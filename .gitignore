@@ -60,3 +60,8 @@ venv.bak/
 # OS files
 .DS_Store
 Thumbs.db
+.AppleDouble
+.LSOverride
+
+# PySide6/Qt
+*.ui.user

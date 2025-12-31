@@ -1,0 +1,13 @@
+# Factory Calibration Tool - Python Dependencies
+# For macOS support
+
+# GUI Framework (required by factory_calibration_tool.py and servo_angle_limit_set.py)
+PySide6>=6.0.0
+
+# Serial communication for servo control
+pyserial>=3.5
+
+# Note: All other dependencies are Python standard library modules:
+# - sys, os, time, threading, subprocess, argparse
+# - typing, queue
+# These are included with Python and do not need installation.
