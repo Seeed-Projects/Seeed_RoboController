@@ -83,7 +83,14 @@ SMS_STS_MIDDLE_POSITION = 2048    # **The correct middle position (center)**
 class MiddleValueCalibrator:
     """STS Servo Middle Value Calibrator - Single Port Version"""
 
-    def __init__(self, port_name: str = "COM1"):
+    def __init__(self, port_name: str = None):
+        # Auto-detect default port based on platform
+        if port_name is None:
+            import platform
+            if platform.system() == "Windows":
+                port_name = "COM1"
+            else:
+                port_name = "/dev/ttyUSB0"
         # Port configuration - single port only
         self.port_name = port_name
         self.port_handler = None
@@ -514,22 +521,32 @@ class MiddleValueCalibrator:
 
 def main():
     """Main function"""
+    import platform
+    import sys
+
+    # Detect default port based on platform
+    if platform.system() == "Windows":
+        default_port = "COM1"
+        port_example = "COM1"
+    else:
+        default_port = "/dev/ttyUSB0"
+        port_example = "/dev/ttyUSB0"
+
     print("Middle Value Calibration Tool v2.1 (Corrected Logic)")
     print("Function: STS servo middle value calibration and centering")
     print(f"Method: Use built-in command (Write 128 to Addr 40) to set center as {SMS_STS_MIDDLE_POSITION}")
     print("Based: scservo_sdk SMS_STS protocol")
     print("=" * 50)
 
-    # Get COM port from user input
-    import sys
+    # Get port from user input
     if len(sys.argv) > 1:
         port_name = sys.argv[1]
-        print(f"Using COM port from command line: {port_name}")
+        print(f"Using port from command line: {port_name}")
     else:
-        port_name = input(f"Enter COM port (e.g., COM1): ").strip()
+        port_name = input(f"Enter port (e.g., {port_example}): ").strip()
         if not port_name:
-            port_name = "COM1"
-            print(f"Using default COM port: {port_name}")
+            port_name = default_port
+            print(f"Using default port: {port_name}")
 
     # Ask user for mode selection
     print("\n" + "=" * 50)

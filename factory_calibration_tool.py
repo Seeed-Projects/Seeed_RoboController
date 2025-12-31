@@ -810,7 +810,19 @@ class ServoPanel(QWidget):
 class EZToolUI(QMainWindow):
     """EZ Tool - 简化版双串口工厂舵机标定工具"""
 
-    def __init__(self, left_port: str = "COM1", right_port: str = "COM2"):
+    def __init__(self, left_port: str = None, right_port: str = None):
+        # Auto-detect default ports based on platform
+        import platform
+        if left_port is None:
+            if platform.system() == "Windows":
+                left_port = "COM1"
+            else:
+                left_port = "/dev/ttyUSB0"
+        if right_port is None:
+            if platform.system() == "Windows":
+                right_port = "COM2"
+            else:
+                right_port = "/dev/ttyUSB1"
         super().__init__()
         self.left_port = left_port
         self.right_port = right_port
@@ -1241,7 +1253,7 @@ class EZToolUI(QMainWindow):
                 }
             """)
             self.add_remote_log(f"✅ {message}")
-            self.status_bar.showMessage("遥控操作已启动 - COM7读取，COM8控制", 5000)
+            self.status_bar.showMessage(f"遥控操作已启动 - {self.left_port}读取，{self.right_port}控制", 5000)
         else:
             self.add_remote_log(f"❌ {message}")
             QMessageBox.critical(self, "启动失败", f"无法启动遥控操作:\n{message}")

@@ -26,7 +26,20 @@ except ImportError as e:
 
 
 class UltraFastRemoteControl:
-    def __init__(self, read_port="COM7", control_port="COM8"):
+    def __init__(self, read_port=None, control_port=None):
+        # Auto-detect default ports based on platform
+        if read_port is None:
+            import platform
+            if platform.system() == "Windows":
+                read_port = "COM7"
+            else:
+                read_port = "/dev/ttyUSB0"
+        if control_port is None:
+            import platform
+            if platform.system() == "Windows":
+                control_port = "COM8"
+            else:
+                control_port = "/dev/ttyUSB1"
         self.master_port = read_port    # 纯读取角度
         self.slave_port = control_port  # 控制舵机
         self.baud_rate = 1000000
@@ -260,9 +273,17 @@ class UltraFastRemoteControl:
 def main():
     """Main function"""
     # 解析命令行参数
+    import platform
+    if platform.system() == "Windows":
+        default_read = "COM7"
+        default_control = "COM8"
+    else:
+        default_read = "/dev/ttyUSB0"
+        default_control = "/dev/ttyUSB1"
+
     parser = argparse.ArgumentParser(description='Ultra Fast Remote Control System')
-    parser.add_argument('--read-port', default='COM7', help='Port for reading servo angles (default: COM7)')
-    parser.add_argument('--control-port', default='COM8', help='Port for controlling servos (default: COM8)')
+    parser.add_argument('--read-port', default=default_read, help=f'Port for reading servo angles (default: {default_read})')
+    parser.add_argument('--control-port', default=default_control, help=f'Port for controlling servos (default: {default_control})')
 
     args = parser.parse_args()
 

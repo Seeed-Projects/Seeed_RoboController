@@ -73,7 +73,11 @@ def main():
         print("You can now run the calibration tool:")
         print("  python factory_calibration_tool.py")
         print("  or")
-        print("  python factory_calibration_tool.py --port1 COM1 --port2 COM2")
+        import platform
+        if platform.system() == "Windows":
+            print("  python factory_calibration_tool.py --port1 COM1 --port2 COM2")
+        else:
+            print("  python factory_calibration_tool.py --port1 /dev/ttyUSB0 --port2 /dev/ttyUSB1")
     else:
         print("\n=== Setup Failed ===")
         print("Please fix the issues above before running the tool.")
