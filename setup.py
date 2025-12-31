@@ -72,12 +72,26 @@ def main():
         print("\n=== Setup Complete! ===")
         print("You can now run the calibration tool:")
         print("  python factory_calibration_tool.py")
-        print("  or")
+        print("\nThe tool will auto-detect available serial ports.")
+        print("Or manually specify ports:")
         import platform
         if platform.system() == "Windows":
             print("  python factory_calibration_tool.py --port1 COM1 --port2 COM2")
         else:
-            print("  python factory_calibration_tool.py --port1 /dev/ttyUSB0 --port2 /dev/ttyUSB1")
+            # macOS/Linux: Show actual detected ports if available
+            try:
+                from port_utils import get_available_ports, list_ports_for_user
+                ports = get_available_ports()
+                if len(ports) >= 2:
+                    print(f"  python factory_calibration_tool.py --port1 {ports[0].device} --port2 {ports[1].device}")
+                elif len(ports) == 1:
+                    print(f"  python factory_calibration_tool.py --port1 {ports[0].device}")
+                    print("  (Note: Only one port detected, connect another adapter)")
+                else:
+                    print("  python factory_calibration_tool.py --port1 /dev/ttyUSB0 --port2 /dev/ttyUSB1")
+                    print("  (No ports detected, please connect USB-to-Serial adapter)")
+            except ImportError:
+                print("  python factory_calibration_tool.py --port1 /dev/ttyUSB0 --port2 /dev/ttyUSB1")
     else:
         print("\n=== Setup Failed ===")
         print("Please fix the issues above before running the tool.")

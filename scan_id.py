@@ -3,7 +3,6 @@
 
 import sys
 import os
-import platform
 
 # 引入 SDK
 sys.path.append('.')
@@ -17,31 +16,16 @@ except ImportError:
     print("❌ 错误: 未找到 scservo_sdk。请确保 scservo_sdk 文件夹在当前目录下。")
     sys.exit(1)
 
+# 引入端口工具
+try:
+    from port_utils import get_default_port, list_ports_for_user
+except ImportError:
+    print("❌ 错误: 未找到 port_utils。请确保 port_utils.py 在当前目录下。")
+    sys.exit(1)
+
 # === 配置 ===
 BAUDRATE = 1000000
 MAX_ID = 20  # 扫描范围 1 - 20
-
-def get_default_port():
-    """自动寻找可用端口"""
-    system = platform.system()
-    # 优先检测 Linux 常用端口
-    if system != "Windows":
-        priority_ports = ['/dev/ttyUSB0', '/dev/ttyACM0', '/dev/ttyACM1', '/dev/ttyUSB1']
-        for port in priority_ports:
-            if os.path.exists(port):
-                return port
-    # 扫描所有可用端口
-    try:
-        import serial.tools.list_ports
-        ports = list(serial.tools.list_ports.comports())
-        if ports:
-            for p in ports:
-                if "USB" in p.description or "ACM" in p.description:
-                    return p.device
-            return ports[0].device
-    except:
-        pass
-    return None
 
 def main():
     print(f"=== 舵机扫描工具 (范围 1-{MAX_ID}) ===")

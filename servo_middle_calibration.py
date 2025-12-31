@@ -71,6 +71,14 @@ except ImportError as e:
                 return -1, 0
 # --- End SDK Import Logic ---
 
+# 引入端口工具
+try:
+    from port_utils import get_default_port, list_ports_for_user
+except ImportError:
+    print("Warning: port_utils not found, using fallback port detection")
+    def get_default_port(index=0):
+        return None
+
 
 # Define register addresses from documentation
 SMS_STS_TORQUE_ENABLE = 40        # Address for Torque switch AND calibration
@@ -84,13 +92,9 @@ class MiddleValueCalibrator:
     """STS Servo Middle Value Calibrator - Single Port Version"""
 
     def __init__(self, port_name: str = None):
-        # Auto-detect default port based on platform
+        # Auto-detect default port using port_utils
         if port_name is None:
-            import platform
-            if platform.system() == "Windows":
-                port_name = "COM1"
-            else:
-                port_name = "/dev/ttyUSB0"
+            port_name = get_default_port(0)
         # Port configuration - single port only
         self.port_name = port_name
         self.port_handler = None
@@ -521,32 +525,31 @@ class MiddleValueCalibrator:
 
 def main():
     """Main function"""
-    import platform
     import sys
 
-    # Detect default port based on platform
-    if platform.system() == "Windows":
-        default_port = "COM1"
-        port_example = "COM1"
-    else:
-        default_port = "/dev/ttyUSB0"
-        port_example = "/dev/ttyUSB0"
+    # Auto-detect default port
+    default_port = get_default_port(0)
+    if not default_port:
+        print("Error: No serial ports found!")
+        print("Please connect a USB-to-Serial adapter and try again.")
+        sys.exit(1)
 
     print("Middle Value Calibration Tool v2.1 (Corrected Logic)")
     print("Function: STS servo middle value calibration and centering")
     print(f"Method: Use built-in command (Write 128 to Addr 40) to set center as {SMS_STS_MIDDLE_POSITION}")
     print("Based: scservo_sdk SMS_STS protocol")
     print("=" * 50)
+    print(f"\nAuto-detected port: {default_port}")
+    print()
 
     # Get port from user input
     if len(sys.argv) > 1:
         port_name = sys.argv[1]
         print(f"Using port from command line: {port_name}")
     else:
-        port_name = input(f"Enter port (e.g., {port_example}): ").strip()
-        if not port_name:
-            port_name = default_port
-            print(f"Using default port: {port_name}")
+        user_input = input(f"Press Enter to use {default_port}, or type a different port: ").strip()
+        port_name = user_input if user_input else default_port
+        print(f"Using port: {port_name}")
 
     # Ask user for mode selection
     print("\n" + "=" * 50)

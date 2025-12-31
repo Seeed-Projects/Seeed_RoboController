@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ultra Fast Remote Control Script - 10ms update interval
-Read servo angles from COM7 -> Sync control to COM8 same ID servos
+Read servo angles from one port -> Sync control to another port same ID servos
 Ultra responsive version for minimal lag
 """
 
@@ -24,22 +24,20 @@ except ImportError as e:
     print("Please ensure scservo_sdk directory exists with necessary files")
     sys.exit(1)
 
+# 引入端口工具
+try:
+    from port_utils import get_default_port, list_ports_for_user
+except ImportError:
+    print("Warning: port_utils not found, using fallback port detection")
+
 
 class UltraFastRemoteControl:
     def __init__(self, read_port=None, control_port=None):
-        # Auto-detect default ports based on platform
+        # Auto-detect default ports using port_utils
         if read_port is None:
-            import platform
-            if platform.system() == "Windows":
-                read_port = "COM7"
-            else:
-                read_port = "/dev/ttyUSB0"
+            read_port = get_default_port(0)  # First available port
         if control_port is None:
-            import platform
-            if platform.system() == "Windows":
-                control_port = "COM8"
-            else:
-                control_port = "/dev/ttyUSB1"
+            control_port = get_default_port(1)  # Second available port
         self.master_port = read_port    # 纯读取角度
         self.slave_port = control_port  # 控制舵机
         self.baud_rate = 1000000
@@ -273,13 +271,8 @@ class UltraFastRemoteControl:
 def main():
     """Main function"""
     # 解析命令行参数
-    import platform
-    if platform.system() == "Windows":
-        default_read = "COM7"
-        default_control = "COM8"
-    else:
-        default_read = "/dev/ttyUSB0"
-        default_control = "/dev/ttyUSB1"
+    default_read = get_default_port(0) or "/dev/ttyUSB0"
+    default_control = get_default_port(1) or "/dev/ttyUSB1"
 
     parser = argparse.ArgumentParser(description='Ultra Fast Remote Control System')
     parser.add_argument('--read-port', default=default_read, help=f'Port for reading servo angles (default: {default_read})')

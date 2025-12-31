@@ -29,6 +29,14 @@ from scservo_sdk.port_handler import PortHandler
 from scservo_sdk.sms_sts import sms_sts
 from scservo_sdk.scservo_def import COMM_SUCCESS
 
+# 引入端口工具
+try:
+    from port_utils import get_default_port, get_available_ports
+    PORT_UTILS_AVAILABLE = True
+except ImportError:
+    PORT_UTILS_AVAILABLE = False
+    print("Warning: port_utils not found, using fallback port detection")
+
 
 class RemoteControlWorker(QObject):
     """遥控操作后台工作线程"""
@@ -811,18 +819,19 @@ class EZToolUI(QMainWindow):
     """EZ Tool - 简化版双串口工厂舵机标定工具"""
 
     def __init__(self, left_port: str = None, right_port: str = None):
-        # Auto-detect default ports based on platform
-        import platform
-        if left_port is None:
-            if platform.system() == "Windows":
-                left_port = "COM1"
-            else:
-                left_port = "/dev/ttyUSB0"
-        if right_port is None:
-            if platform.system() == "Windows":
-                right_port = "COM2"
-            else:
-                right_port = "/dev/ttyUSB1"
+        # Auto-detect default ports using port_utils
+        if PORT_UTILS_AVAILABLE:
+            if left_port is None:
+                left_port = get_default_port(0)
+            if right_port is None:
+                right_port = get_default_port(1)
+        else:
+            # Fallback to platform-based detection
+            import platform
+            if left_port is None:
+                left_port = "COM1" if platform.system() == "Windows" else "/dev/ttyUSB0"
+            if right_port is None:
+                right_port = "COM2" if platform.system() == "Windows" else "/dev/ttyUSB1"
         super().__init__()
         self.left_port = left_port
         self.right_port = right_port
