@@ -1,15 +1,15 @@
 <div align="center">
 
-# FTServo 工厂校准工具
-# FTServo Factory Calibration Tool
+# Seeed Studio SoARM 系列校准工具
+# Seeed Studio SoARM Series Calibration Tool
+
+**专为 Seeed Studio SoARM 10X 系列机械臂设计的 FTServo 舵机工厂校准工具包**
+
+*A complete FTServo servo factory calibration toolkit designed for Seeed Studio SoARM 10X series robotic arms*
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Ubuntu%20%7C%20macOS-blue)
 ![Python](https://img.shields.io/badge/python-3.7+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
-
-**一套完整的 FTServo 舵机工厂校准工具包**
-
-*A complete FTServo servo factory calibration toolkit*
 
 [功能特性](#-功能特性)  [快速开始](#-快速开始)  [使用文档](#-使用文档)  [故障排除](#-故障排除)
 
@@ -438,6 +438,8 @@ Seeed_RoboController/
 
 **如有问题，请提交 Issue**
 
-Made with for FTServo Community
+Built with ❤️ for the SoARM 10X community
+
+Powered by Seeed Studio
 
 </div>
