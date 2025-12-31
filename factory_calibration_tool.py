@@ -1752,19 +1752,25 @@ class EZToolUI(QMainWindow):
 
 
 def get_available_ports():
-    """获取可用串口列表"""
+    """获取可用串口列表 - 使用 port_utils 中已过滤的端口"""
     try:
-        import serial.tools.list_ports
-        ports = []
-        for port in serial.tools.list_ports.comports():
-            ports.append(port.device)
-        return sorted(ports)
+        from port_utils import get_available_ports as get_ports
+        ports = get_ports()
+        return [p.device for p in ports]
     except ImportError:
-        print("Warning: pyserial not available, using default ports")
-        if platform.system() == "Windows":
-            return ["COM1", "COM2"]
-        else:
-            return ["/dev/ttyUSB0", "/dev/ttyUSB1"]
+        print("Warning: port_utils not available, using fallback")
+        try:
+            import serial.tools.list_ports
+            ports = []
+            for port in serial.tools.list_ports.comports():
+                ports.append(port.device)
+            return sorted(ports)
+        except ImportError:
+            print("Warning: pyserial not available, using default ports")
+            if platform.system() == "Windows":
+                return ["COM1", "COM2"]
+            else:
+                return ["/dev/ttyUSB0", "/dev/ttyUSB1"]
 
 
 def main():

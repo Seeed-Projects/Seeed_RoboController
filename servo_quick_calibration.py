@@ -1,108 +1,214 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Quick Middle Value Calibration - Disable servos and set current position as center
-Non-blocking version for GUI integration
+舵机快速校准工具 - 快速失能并校准中位
+Servo Quick Calibration - Quick disable and calibrate middle value
+
+用法 / Usage:
+    python servo_quick_calibration.py          # 交互式选择端口 / Interactive port selection
+    python servo_quick_calibration.py <port>   # 指定端口 / Specify port
+    python servo_quick_calibration.py --list   # 列出可用端口 / List available ports
 """
 
 import sys
 import os
 import time
+from typing import Optional
 
-# Add SCServo SDK path
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# 引入 SDK
 sys.path.append('.')
-sys.path.append('..')
-sys.path.append('../scservo_sdk')
-sys.path.append('../../')
+sys.path.append('./scservo_sdk')
 
 try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
-    print(f"Error: Cannot import SCServo SDK: {e}")
+    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print("   Error: Cannot import SCServo SDK")
     sys.exit(1)
 
-# Register addresses
+# 引入端口工具
+try:
+    from port_utils import select_port_interactive, get_available_ports, list_ports_for_user
+except ImportError:
+    print("❌ 错误: 未找到 port_utils")
+    print("   Error: port_utils not found")
+    sys.exit(1)
+
+# === 配置常量 ===
+BAUD_RATE = 1000000
 SMS_STS_TORQUE_ENABLE = 40
-SMS_STS_CALIBRATE_MIDDLE_VALUE = 128
+TORQUE_OFF = 0
+SMS_STS_CALIBRATE_MIDDLE = 128  # 校准命令：将当前位置设为2048
 
-def quick_middle_calibration(port_name: str):
-    """Quick calibration: disable all servos and set current positions as center"""
-    print(f"Quick Middle Calibration: {port_name}")
-    print("=" * 40)
 
-    port_handler = PortHandler(port_name)
-    if not port_handler.openPort():
-        print(f"Cannot open {port_name}")
-        return False
-    if not port_handler.setBaudRate(1000000):
-        print(f"Cannot set baud rate for {port_name}")
-        port_handler.closePort()
-        return False
+def scan_servos(servo_handler) -> list:
+    """扫描端口上的所有舵机"""
+    found = []
+    for servo_id in range(1, 21):
+        model_number, result, error = servo_handler.ping(servo_id)
+        if result == COMM_SUCCESS:
+            found.append(servo_id)
+    return found
 
-    servo_handler = sms_sts(port_handler)
 
+def quick_calibration(port_name: str) -> bool:
+    """
+    快速校准 - 失能舵机并校准中位（将当前位置设为2048）
+
+    流程：
+    1. 失能所有舵机
+    2. 将当前物理位置校准为中位(2048)
+
+    Args:
+        port_name: 串口名称
+
+    Returns:
+        bool: 校准是否成功
+    """
+    print(f"\n{'='*50}")
+    print(f"⚡ 舵机快速校准工具 / Servo Quick Calibration")
+    print(f"{'='*50}")
+    print(f"端口 / Port: {port_name}")
+    print(f"{'='*50}\n")
+
+    # 初始化端口
     try:
-        # Step 1: Disable all servos first
-        print("Disabling all servos...")
-        servo_ids = [1, 2, 3, 4, 5, 6]
-        disabled_count = 0
+        port_handler = PortHandler(port_name)
+        if not port_handler.openPort():
+            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            return False
+        if not port_handler.setBaudRate(BAUD_RATE):
+            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            port_handler.closePort()
+            return False
 
-        for servo_id in servo_ids:
-            result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, 0)
-            if result == COMM_SUCCESS:
-                disabled_count += 1
-            time.sleep(0.05)
+        servo_handler = sms_sts(port_handler)
 
-        print(f"+ {disabled_count} servos disabled")
-        time.sleep(1)  # Wait for servos to stabilize
+        # 扫描舵机
+        print("📡 扫描舵机 / Scanning servos...")
+        found_servos = scan_servos(servo_handler)
 
-        # Step 2: Calibrate middle values for all servos
-        print("Calibrating middle values...")
-        calibrated_count = 0
+        if not found_servos:
+            print("❌ 未发现舵机 / No servos found")
+            port_handler.closePort()
+            return False
 
-        for servo_id in servo_ids:
-            print(f"  Calibrating ID{servo_id}...")
-
-            # Unlock EEPROM
-            result, error = servo_handler.unLockEprom(servo_id)
-            if result != COMM_SUCCESS:
-                print(f"    EEPROM unlock failed: {error}")
-                continue
-
-            time.sleep(0.05)
-
-            # Send calibration command (128 to Addr 40)
-            result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_CALIBRATE_MIDDLE_VALUE)
-            if result != COMM_SUCCESS:
-                print(f"    Calibration failed: {error}")
-                servo_handler.LockEprom(servo_id)
-                continue
-
-            time.sleep(0.05)
-
-            # Lock EEPROM
-            servo_handler.LockEprom(servo_id)
-            calibrated_count += 1
-            print(f"    + ID{servo_id} calibrated")
-
-        print(f"+ {calibrated_count} servos calibrated successfully")
-        print("Calibration complete!")
-        return True
+        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ 初始化异常 / Init error: {e}")
+        return False
+
+    try:
+        # Step 1: 失能所有舵机
+        print("⏹️ Step 1: 失能舵机 / Disabling servos...")
+        print("-" * 50)
+        disabled_count = 0
+        failed_disable = []
+
+        for servo_id in found_servos:
+            result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, TORQUE_OFF)
+            if result == COMM_SUCCESS:
+                disabled_count += 1
+            else:
+                failed_disable.append(servo_id)
+            time.sleep(0.05)
+
+        print(f"✅ {disabled_count}/{len(found_servos)} 个舵机已失能 / {disabled_count}/{len(found_servos)} servos disabled")
+        if failed_disable:
+            print(f"   失败 / Failed: {failed_disable}")
+        print()
+
+        time.sleep(1)  # 等待舵机稳定
+
+        # Step 2: 校准中位
+        print("🔧 Step 2: 校准中位（当前位置→2048）/ Calibrating middle (current→2048)")
+        print("-" * 50)
+        print("💡 确保舵机已手动调整到期望的中位位置")
+        print("   Make sure servos are manually adjusted to desired center position")
+        print("-" * 50)
+
+        calibrated_count = 0
+        failed_calibrate = []
+
+        for servo_id in found_servos:
+            print(f"  ID{servo_id}...", end=" ")
+
+            # 解锁 EEPROM
+            result, error = servo_handler.unLockEprom(servo_id)
+            if result != COMM_SUCCESS:
+                print(f"❌ EEPROM解锁失败 / Unlock failed")
+                failed_calibrate.append(servo_id)
+                continue
+            time.sleep(0.05)
+
+            # 发送校准命令（写128到地址40）
+            result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_CALIBRATE_MIDDLE)
+            if result != COMM_SUCCESS:
+                print(f"❌ 校准失败 / Calibration failed")
+                servo_handler.LockEprom(servo_id)
+                failed_calibrate.append(servo_id)
+                continue
+            time.sleep(0.05)
+
+            # 重新锁定 EEPROM
+            servo_handler.LockEprom(servo_id)
+
+            calibrated_count += 1
+            print("✅ 成功 / Success")
+
+        print()
+        print("=" * 50)
+
+        if calibrated_count == len(found_servos):
+            print(f"✅ 全部成功! / All Success! {calibrated_count}/{len(found_servos)} 个舵机已校准")
+            print(f"   {calibrated_count}/{len(found_servos)} servos calibrated")
+        else:
+            print(f"⚠️ 部分成功 / Partial: {calibrated_count}/{len(found_servos)} 个舵机已校准")
+            if failed_calibrate:
+                print(f"   失败的舵机 / Failed servos: {failed_calibrate}")
+
+        print("=" * 50)
+        print()
+        print("✅ 快速校准完成 / Quick calibration complete!")
+        print("=" * 50)
+
+        return calibrated_count > 0
+
+    except Exception as e:
+        print(f"\n❌ 校准异常 / Calibration error: {e}")
         return False
     finally:
-        port_handler.closePort()
+        try:
+            port_handler.closePort()
+        except:
+            pass
+
+
+def main():
+    """主函数"""
+    # 解析参数
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--list":
+            print("=== 可用串口 / Available Serial Ports ===")
+            print(list_ports_for_user())
+            return
+        else:
+            port_name = sys.argv[1]
+            print(f"🔌 使用指定端口 / Using specified port: {port_name}")
+    else:
+        # 交互式选择端口
+        port_name = select_port_interactive("选择校准串口 / Select port to calibrate")
+        if not port_name:
+            print("❌ 未选择端口 / No port selected")
+            sys.exit(1)
+
+    # 执行快速校准
+    success = quick_calibration(port_name)
+    sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python quick_calibration.py <port_name>")
-        sys.exit(1)
-
-    port_name = sys.argv[1]
-    success = quick_middle_calibration(port_name)
-    sys.exit(0 if success else 1)
+    main()

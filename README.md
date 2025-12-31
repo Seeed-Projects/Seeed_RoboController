@@ -1,159 +1,426 @@
-# FTServo 工厂校准工具 (FTServo Factory Calibration Tool)
+# FTServo 工厂校准工具
+# FTServo Factory Calibration Tool
 
-这是一个完整的FTServo舵机工厂校准工具包，包含双串口校准GUI界面和所有必要的脚本。支持 Windows、macOS 和 Linux。
+<div align="center">
 
-**主要特性：自动检测可用串口，跨平台支持**
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Ubuntu%20%7C%20macOS-blue)
+![Python](https://img.shields.io/badge/python-3.7+-green)
+![License](https://img.shields.io/badge/license-MIT-orange)
 
-## 文件说明 (File Description)
+一套完整的 FTServo 舵机工厂校准工具包
+A complete FTServo servo factory calibration toolkit
 
-- `factory_calibration_tool.py` - 主GUI应用程序，支持双串口舵机校准
-- `servo_angle_limit_set.py` - 舵机角度限制设置GUI工具
-- `servo_middle_calibration.py` - 舵机中位值校准脚本
-- `servo_quick_calibration.py` - 快速校准脚本
-- `servo_center_test.py` - 舵机中心测试脚本
-- `servo_disable.py` - 舵机失能脚本
-- `servo_remote_control.py` - 遥控操作脚本
-- `scan_id.py` - 舵机ID扫描工具
-- `change_single_servo_id.py` - 修改单个舵机ID工具
-- `port_utils.py` - 跨平台串口检测工具模块
-- `scservo_sdk/` - SCServo SDK文件夹，包含舵机通信库
-- `setup.py` - 自动化安装和检查脚本
-- `requirements.txt` - Python依赖清单
+[功能特性](#功能特性) • [快速开始](#快速开始) • [使用文档](#使用文档) • [故障排除](#故障排除)
 
-## 安装 (Installation)
+</div>
 
-### 方法一：使用 requirements.txt（推荐）
+---
+
+## 功能特性
+
+| 特性 | 说明 |
+|------|------|
+| 自动端口检测 | 智能识别 USB 串口，自动过滤虚拟设备 |
+| 跨平台支持 | Windows / Ubuntu / macOS 全平台兼容 |
+| 交互式选择 | 友好的命令行交互，轻松选择串口 |
+| 双端口同步 | 支持主从双端口同步遥控控制 |
+| GUI 工具 | Qt 图形界面，直观易用 |
+| 自动扫描 | 自动检测 ID 1-20 范围内所有舵机 |
+
+---
+
+## 快速开始
+
+### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 方法二：手动安装
+或手动安装：
 
 ```bash
 pip install PySide6 pyserial
 ```
 
-### 方法三：运行安装脚本
+### 2. 查看可用串口
 
 ```bash
-python setup.py
+python scan_id.py --list
 ```
 
-## 使用方法 (Usage)
-
-### 自动检测模式（推荐）
-
-所有脚本支持自动检测可用串口，无需手动指定：
+### 3. 连接舵机并扫描
 
 ```bash
-# 主GUI工具 - 自动检测前两个可用串口
+python scan_id.py
+```
+
+---
+
+## 脚本工具对照表
+
+| 脚本名称 | 功能描述 | Windows | Ubuntu | macOS |
+|----------|----------|---------|--------|-------|
+| [factory_calibration_tool.py](#factory_calibration_toolpy) | 双端口 GUI 校准工具 | ![Windows] | ![Ubuntu] | ![macOS] |
+| [scan_id.py](#scan_idpy) | 扫描检测舵机 ID | ![Windows] | ![Ubuntu] | ![macOS] |
+| [servo_center_test.py](#servo_center_testpy) | 中位测试验证 | ![Windows] | ![Ubuntu] | ![macOS] |
+| [servo_disable.py](#servo_disablepy) | 失能舵机力矩 | ![Windows] | ![Ubuntu] | ![macOS] |
+| [servo_middle_calibration.py](#servo_middle_calibrationpy) | 中位校准 | ![Windows] | ![Ubuntu] | ![macOS] |
+| [servo_quick_calibration.py](#servo_quick_calibrationpy) | 快速失能+校准 | ![Windows] | ![Ubuntu] | ![macOS] |
+| [servo_remote_control.py](#servo_remote_controlpy) | 双端口同步遥控 | ![Windows] | ![Ubuntu] | ![macOS] |
+| [servo_angle_limit_set.py](#servo_angle_limit_setpy) | 角度限制设置 GUI | ![Windows] | ![Ubuntu] | ![macOS] |
+| [change_single_servo_id.py](#change_single_servo_idpy) | 修改单个舵机 ID | ![Windows] | ![Ubuntu] | ![macOS] |
+
+![Windows]: https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows
+![Ubuntu]: https://img.shields.io/badge/Ubuntu-E95420?style=flat-square&logo=ubuntu
+![macOS]: https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple
+
+---
+
+## 使用文档
+
+### factory_calibration_tool.py
+
+双串口 GUI 校准工具，支持完整的舵机校准流程。
+
+```bash
+# 交互式选择端口
 python factory_calibration_tool.py
 
-# 扫描舵机ID - 自动检测第一个可用串口
+# 手动指定端口
+python factory_calibration_tool.py --port1 /dev/cu.usbserial-xxx --port2 /dev/cu.usbserial-yyy
+```
+
+**功能：**
+- 双端口独立控制
+- 中位校准与测试
+- 实时位置读取
+- 力矩开关控制
+
+---
+
+### scan_id.py
+
+扫描串口上的所有舵机，自动检测 ID 1-20。
+
+```bash
+# 交互式选择端口
 python scan_id.py
 
-# 中位校准 - 自动检测并提示选择串口
+# 指定端口扫描
+python scan_id.py /dev/cu.usbserial-xxx
+
+# 列出可用端口
+python scan_id.py --list
+```
+
+**输出示例：**
+```
+=== 可用串口 / Available Serial Ports ===
+[1] /dev/cu.usbserial-xxx - USB Serial
+[2] /dev/cu.usbmodem-yyy - USB Modem
+
+📡 扫描舵机 / Scanning servos...
+  ✅ ID1: SMS_STS-485 (Model: 3310)
+  ✅ ID2: SMS_STS-485 (Model: 3310)
+  ✅ ID3: SMS_STS-485 (Model: 3310)
+```
+
+---
+
+### servo_center_test.py
+
+测试舵机中位校准结果，移动到位置 2048 验证。
+
+```bash
+# 交互式选择端口
+python servo_center_test.py
+
+# 指定端口测试
+python servo_center_test.py /dev/cu.usbserial-xxx
+```
+
+**测试流程：**
+1. 扫描舵机
+2. 读取当前位置
+3. 启动力矩
+4. 移动到中位 (2048)
+5. 显示位移结果
+
+**判断标准：**
+- 校准成功：舵机保持原位（位移很小）
+- 需要重新校准：舵机移动幅度较大
+
+---
+
+### servo_disable.py
+
+关闭舵机力矩，使其可以手动旋转。
+
+```bash
+# 交互式选择端口
+python servo_disable.py
+
+# 指定端口失能
+python servo_disable.py /dev/cu.usbserial-xxx
+```
+
+**使用场景：**
+- 手动调整舵机位置
+- 校准前准备
+- 维护和检修
+
+---
+
+### servo_middle_calibration.py
+
+舵机中位校准，将当前位置设为中位值 (2048)。
+
+```bash
+# 交互式选择端口（可选择模式）
 python servo_middle_calibration.py
 
-# 遥控操作 - 自动检测前两个可用串口
+# 指定端口校准
+python servo_middle_calibration.py /dev/cu.usbserial-xxx
+```
+
+**两种模式：**
+
+| 模式 | 说明 |
+|------|------|
+| 交互式 | 逐步引导，每个步骤需确认 |
+| 自动 | 快速执行，自动完成校准 |
+
+**校准流程：**
+1. 扫描舵机
+2. 失能舵机（可选）
+3. 手动调整到期望中位
+4. 发送校准命令
+5. 移动测试验证
+
+---
+
+### servo_quick_calibration.py
+
+快速失能并校准中位，一键完成。
+
+```bash
+# 交互式选择端口
+python servo_quick_calibration.py
+
+# 指定端口
+python servo_quick_calibration.py /dev/cu.usbserial-xxx
+```
+
+**快捷流程：**
+1. 自动失能所有舵机
+2. 等待手动调整
+3. 一键校准中位
+
+---
+
+### servo_remote_control.py
+
+双端口同步遥控系统，从主控端口读取角度，同步控制从控端口。
+
+```bash
+# 交互式选择双端口
 python servo_remote_control.py
+
+# 指定端口
+python servo_remote_control.py --read-port /dev/cu.usbserial-xxx --control-port /dev/cu.usbserial-yyy
 ```
 
-### 手动指定串口
+**控制参数：**
+- 更新间隔：10ms (100Hz)
+- 舵机速度：3000
+- 加速度：100
 
-**Windows:**
+**使用场景：**
+- 主从同步控制
+- 镜像运动复制
+- 双机器人协作
+
+---
+
+### servo_angle_limit_set.py
+
+GUI 工具，设置舵机角度限制范围。
+
 ```bash
-python factory_calibration_tool.py --port1 COM1 --port2 COM2
+python servo_angle_limit_set.py
 ```
 
-**macOS / Linux:**
-```bash
-# 使用自动检测到的设备
-python factory_calibration_tool.py --port1 /dev/cu.usbserial-xxx --port2 /dev/cu.usbserial-yyy
+---
 
-# 或使用标准设备名（如果有映射）
-python factory_calibration_tool.py --port1 /dev/ttyUSB0 --port2 /dev/ttyUSB1
+### change_single_servo_id.py
+
+修改单个舵机的 ID 地址。
+
+```bash
+python change_single_servo_id.py
 ```
 
-## 串口配置 (Serial Port Configuration)
+---
 
-### 自动检测优先级
+## 串口配置
 
-工具使用 `port_utils.py` 自动检测串口，按以下优先级排序：
+### 自动端口检测
 
-| 平台 | 最高优先级 | 次优先级 |
-|------|-----------|----------|
-| **macOS** | `/dev/cu.usbserial-*` | `/dev/cu.usbmodem-*` |
-| **macOS** | `/dev/cu.usbserial-*` | `/dev/tty.usbserial-*` |
-| **Linux** | `/dev/ttyUSB*` | `/dev/ttyACM*` |
-| **Windows** | COM1, COM2... | （按编号排序） |
+所有脚本使用 `port_utils.py` 进行智能端口检测：
 
-> **注意**: macOS 上优先使用 `cu.*` 设备而非 `tty.*`，因为 `cu` 设备是非阻塞的，更适合通信应用。
+```
+优先级排序：
+┌─────────────────────────────────────────────────────────┐
+│ macOS: cu.usbserial → cu.usbmodem → cu.* → tty.*      │
+│ Linux: ttyUSB → ttyACM → others                        │
+│ Windows: COM1 → COM2 → ... (按编号)                    │
+└─────────────────────────────────────────────────────────┘
 
-### 查找可用串口
+自动过滤：
+┌─────────────────────────────────────────────────────────┐
+│ ✗ DEBUG      (调试端口)                                 │
+│ ✗ BLUETOOTH  (蓝牙设备)                                 │
+│ ✗ RFCOMM     (蓝牙 RFCOMM)                              │
+│ ✗ INCOMING   (传入连接)                                 │
+└─────────────────────────────────────────────────────────┘
+```
 
-**macOS:**
+### 平台特定说明
+
+#### macOS
+
+| 设备类型 | 路径格式 | 推荐 |
+|----------|----------|------|
+| USB Serial | `/dev/cu.usbserial-*` | ![Yes] |
+| USB Modem | `/dev/cu.usbmodem-*` | ![Yes] |
+| TTY 设备 | `/dev/tty.usbserial-*` | ![No] |
+
+查看可用端口：
 ```bash
-# 列出所有串口设备
-ls /dev/tty.* /dev/cu.*
-
-# 使用 Python 脚本检测
+ls /dev/cu.* /dev/tty.*
 python -c "from port_utils import list_ports_for_user; print(list_ports_for_user())"
 ```
 
-**Linux:**
+![Yes]: https://img.shields.io/badge/✓-推荐-success?style=flat-square
+![No]: https://img.shields.io/badge✗-不推荐-critical?style=flat-square
+
+#### Ubuntu/Linux
+
 ```bash
-# 列出 USB 串口设备
+# 查看可用端口
 ls -l /dev/ttyUSB* /dev/ttyACM*
 
-# 或使用 dmesg 查看最近插入的设备
+# 查看插入设备
 dmesg | grep tty
 ```
 
-**Windows:**
+#### Windows
+
 ```bash
 # 在设备管理器中查看 "端口 (COM 和 LPT)"
 # 或使用 Python
 python -c "from port_utils import list_ports_for_user; print(list_ports_for_user())"
 ```
 
-### macOS 串口设备说明
+---
 
-| 设备类型 | 路径格式 | 说明 |
-|----------|----------|------|
-| 呼出设备（推荐） | `/dev/cu.usbserial-*` | 非阻塞，适合通信 |
-| 呼入设备 | `/dev/tty.usbserial-*` | 可能阻塞，不推荐 |
-| USB Modem | `/dev/cu.usbmodem-*` | Arduino 风格设备 |
-| 蓝牙串口 | `/dev/cu.Bluetooth*` | 蓝牙虚拟串口 |
+## 常见问题
 
-## 功能特性 (Features)
+### Q: macOS 上检测到 `/dev/cu.debug-console` 而不是 USB 设备？
 
-- 自动检测可用串口（跨平台）
-- macOS 上优先使用 `cu.*` 非阻塞设备
-- 双串口同时校准支持
-- 动态串口选择和切换
-- 中位校准、中位测试、失能电机功能
-- 舵机角度限制设置
-- 水平布局UI，美观节省空间
-- 连接稳定性和智能重试机制
+**A:** 这通常发生在没有物理 USB 设备连接时。新版本已自动过滤此类虚拟设备。确保 USB 舵机已正确连接。
 
-## 系统要求 (Requirements)
+### Q: 提示 "Need at least 2 serial ports"？
 
-- Python 3.7+
-- PySide6（GUI界面）
-- pyserial（串口通信）
+**A:** 双端口工具需要两个 USB 设备。检查：
+```bash
+python scan_id.py --list
+```
 
-## 注意事项 (Notes)
+### Q: 舵机校准后移动幅度很大？
 
-- 首次使用前请运行 `python setup.py` 检查环境
-- 确保舵机正确连接到串口
-- 校准过程中请勿移动舵机
-- macOS 用户可能需要安装 USB 驱动程序：
-  - **CH340 芯片**: [下载地址](http://www.wch.cn/download/CH341SER_MAC_ZIP.html)
-  - **CP2102 芯片**: [下载地址](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)
-  - **FTDI 芯片**: 通常 macOS 自带驱动
+**A:** 说明校准前舵机不在正确中位。重新运行：
+```bash
+python servo_middle_calibration.py
+```
+在校准前手动将舵机调整到期望的中位位置。
 
-## 许可证 (License)
+### Q: macOS 上无法访问串口？
 
-本项目遵循 MIT 许可证。
+**A:** 可能需要安装 USB 转串口驱动：
+
+| 芯片型号 | 驱动下载 |
+|----------|----------|
+| CH340 | [下载](http://www.wch.cn/download/CH341SER_MAC_ZIP.html) |
+| CP2102 | [下载](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers) |
+| FTDI | 通常自带驱动 |
+
+### Q: Linux 上提示权限拒绝？
+
+**A:** 将用户添加到 dialout 组：
+```bash
+sudo usermod -a -G dialout $USER
+# 重新登录后生效
+```
+
+---
+
+## 系统要求
+
+| 项目 | 要求 |
+|------|------|
+| Python | 3.7 或更高版本 |
+| PySide6 | >= 6.0 |
+| pyserial | >= 3.5 |
+
+---
+
+## 项目结构
+
+```
+Seeed_RoboController/
+├── factory_calibration_tool.py    # GUI 双端口校准工具
+├── servo_angle_limit_set.py       # 角度限制设置 GUI
+├── scan_id.py                     # 舵机 ID 扫描
+├── servo_center_test.py           # 中位测试
+├── servo_disable.py               # 舵机失能
+├── servo_middle_calibration.py    # 中位校准
+├── servo_quick_calibration.py     # 快速校准
+├── servo_remote_control.py        # 双端口遥控
+├── change_single_servo_id.py      # 修改舵机 ID
+├── port_utils.py                  # 串口工具模块
+├── scservo_sdk/                   # SCServo SDK
+├── setup.py                       # 安装检查脚本
+├── requirements.txt               # 依赖清单
+└── README.md                      # 项目文档
+```
+
+---
+
+## 更新日志
+
+### v2.0 (最新)
+
+- 智能端口选择，自动过滤虚拟设备
+- 交互式端口选择
+- 自动扫描 ID 1-20 范围内舵机
+- 修正中位值为 2048
+- 全平台兼容性增强
+- 双语界面（中文/English）
+
+---
+
+## 许可证
+
+本项目采用 MIT 许可证开源。
+
+---
+
+<div align="center">
+
+**如有问题，请提交 Issue**
+
+Made with ❤️ for FTServo Community
+
+</div>

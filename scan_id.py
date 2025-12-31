@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+舵机扫描工具 - 扫描指定端口上的所有舵机
+Servo ID Scanner - Scan all servos on specified port
+"""
 
 import sys
 import os
@@ -18,7 +22,7 @@ except ImportError:
 
 # 引入端口工具
 try:
-    from port_utils import get_default_port, list_ports_for_user
+    from port_utils import select_port_interactive, get_default_port
 except ImportError:
     print("❌ 错误: 未找到 port_utils。请确保 port_utils.py 在当前目录下。")
     sys.exit(1)
@@ -27,20 +31,24 @@ except ImportError:
 BAUDRATE = 1000000
 MAX_ID = 20  # 扫描范围 1 - 20
 
+
 def main():
     print(f"=== 舵机扫描工具 (范围 1-{MAX_ID}) ===")
 
-    # 1. 获取端口
+    # 1. 获取端口 - 支持命令行参数或交互式选择
     if len(sys.argv) > 1:
         port_name = sys.argv[1]
+        print(f"🔌 使用命令行指定端口: {port_name}")
     else:
-        port_name = get_default_port()
+        # 交互式选择端口
+        port_name = select_port_interactive("选择要扫描的串口 / Select port to scan")
+        if not port_name:
+            print("❌ 未选择端口，退出 / No port selected, exit")
+            sys.exit(1)
 
     if not port_name:
         print("❌ 未找到可用串口！请检查连接。")
         sys.exit(1)
-
-    print(f"🔌 使用端口: {port_name}")
 
     # 2. 初始化连接
     try:

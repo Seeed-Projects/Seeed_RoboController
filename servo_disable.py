@@ -1,79 +1,170 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Quick Motor Disable - Set torque to 0 for all servos so they can be manually rotated
-Non-blocking version for GUI integration
+舵机失能工具 - 关闭所有舵机力矩，使其可以手动旋转
+Servo Disable Tool - Set torque to 0 for all servos so they can be manually rotated
+
+用法 / Usage:
+    python servo_disable.py                # 交互式选择端口 / Interactive port selection
+    python servo_disable.py <port>         # 指定端口 / Specify port
+    python servo_disable.py --list         # 列出可用端口 / List available ports
 """
 
 import sys
 import os
 import time
+from typing import Optional
 
-# Add SCServo SDK path
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# 引入 SDK
 sys.path.append('.')
-sys.path.append('..')
-sys.path.append('../scservo_sdk')
-sys.path.append('../../')
+sys.path.append('./scservo_sdk')
 
 try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
-    print(f"Error: Cannot import SCServo SDK: {e}")
+    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print("   Error: Cannot import SCServo SDK")
     sys.exit(1)
 
-# Register addresses
+# 引入端口工具
+try:
+    from port_utils import select_port_interactive, get_available_ports, list_ports_for_user
+except ImportError:
+    print("❌ 错误: 未找到 port_utils")
+    print("   Error: port_utils not found")
+    sys.exit(1)
+
+# === 配置常量 ===
+BAUD_RATE = 1000000
 SMS_STS_TORQUE_ENABLE = 40
+TORQUE_OFF = 0
 
-def quick_motor_disable(port_name: str):
-    """Quick disable: set torque to 0 for all servos"""
-    print(f"Quick Motor Disable: {port_name}")
-    print("=" * 40)
 
-    port_handler = PortHandler(port_name)
-    if not port_handler.openPort():
-        print(f"Cannot open {port_name}")
-        return False
-    if not port_handler.setBaudRate(1000000):
-        print(f"Cannot set baud rate for {port_name}")
-        port_handler.closePort()
-        return False
+def scan_servos(servo_handler) -> list:
+    """扫描端口上的所有舵机"""
+    found = []
+    for servo_id in range(1, 21):
+        model_number, result, error = servo_handler.ping(servo_id)
+        if result == COMM_SUCCESS:
+            found.append(servo_id)
+    return found
 
-    servo_handler = sms_sts(port_handler)
 
+def disable_servos(port_name: str) -> bool:
+    """
+    失能所有舵机 - 关闭力矩使舵机可以手动旋转
+
+    Args:
+        port_name: 串口名称
+
+    Returns:
+        bool: 操作是否成功
+    """
+    print(f"\n{'='*50}")
+    print(f"⏹️ 舵机失能工具 / Servo Disable Tool")
+    print(f"{'='*50}")
+    print(f"端口 / Port: {port_name}")
+    print(f"{'='*50}\n")
+
+    # 初始化端口
     try:
-        # Disable torque on all servos
-        print("Disabling torque on all servos...")
-        servo_ids = [1, 2, 3, 4, 5, 6]
-        disabled_count = 0
+        port_handler = PortHandler(port_name)
+        if not port_handler.openPort():
+            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            return False
+        if not port_handler.setBaudRate(BAUD_RATE):
+            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            port_handler.closePort()
+            return False
 
-        for servo_id in servo_ids:
-            print(f"  Disabling ID{servo_id}...")
-            result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, 0)
-            if result == COMM_SUCCESS:
-                disabled_count += 1
-                print(f"    + ID{servo_id} torque disabled")
-            else:
-                print(f"    X ID{servo_id} failed: {error}")
-            time.sleep(0.05)
+        servo_handler = sms_sts(port_handler)
 
-        print(f"+ {disabled_count}/{len(servo_ids)} servos disabled")
-        print("All servos can now be manually rotated!")
-        return True
+        # Step 1: 扫描舵机
+        print("📡 扫描舵机 / Scanning servos...")
+        found_servos = scan_servos(servo_handler)
+
+        if not found_servos:
+            print("❌ 未发现舵机 / No servos found")
+            port_handler.closePort()
+            return False
+
+        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ 初始化异常 / Init error: {e}")
+        return False
+
+    try:
+        # Step 2: 关闭所有舵机力矩
+        print("⏹️ 关闭舵机力矩 / Disabling servo torque...")
+        print("-" * 50)
+        disabled_count = 0
+        failed_servos = []
+
+        for servo_id in found_servos:
+            print(f"  🔧 ID{servo_id}...", end=" ")
+            result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, TORQUE_OFF)
+            if result == COMM_SUCCESS:
+                disabled_count += 1
+                print("✅ 已失能 / Disabled")
+            else:
+                failed_servos.append(servo_id)
+                print(f"❌ 失败 / Failed: {error}")
+            time.sleep(0.05)
+
+        print()
+        print("=" * 50)
+
+        if disabled_count == len(found_servos):
+            print(f"✅ 成功! / Success! {disabled_count}/{len(found_servos)} 个舵机已失能")
+            print("   {disabled_count}/{len(found_servos)} servos disabled")
+        else:
+            print(f"⚠️ 部分成功 / Partial: {disabled_count}/{len(found_servos)} 个舵机已失能")
+            if failed_servos:
+                print(f"   失败的舵机 / Failed servos: {failed_servos}")
+
+        print("=" * 50)
+        print()
+        print("💡 现在可以手动旋转舵机进行调整")
+        print("   You can now manually rotate the servos for adjustment")
+        print("=" * 50)
+
+        return disabled_count > 0
+
+    except Exception as e:
+        print(f"\n❌ 操作异常 / Operation error: {e}")
         return False
     finally:
-        port_handler.closePort()
+        try:
+            port_handler.closePort()
+        except:
+            pass
+
+
+def main():
+    """主函数"""
+    # 解析参数
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--list":
+            print("=== 可用串口 / Available Serial Ports ===")
+            print(list_ports_for_user())
+            return
+        else:
+            port_name = sys.argv[1]
+            print(f"🔌 使用指定端口 / Using specified port: {port_name}")
+    else:
+        # 交互式选择端口
+        port_name = select_port_interactive("选择失能舵机的串口 / Select port to disable servos")
+        if not port_name:
+            print("❌ 未选择端口 / No port selected")
+            sys.exit(1)
+
+    # 执行失能操作
+    success = disable_servos(port_name)
+    sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python quick_disable.py <port_name>")
-        sys.exit(1)
-
-    port_name = sys.argv[1]
-    success = quick_motor_disable(port_name)
-    sys.exit(0 if success else 1)
+    main()

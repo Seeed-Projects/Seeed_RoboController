@@ -1,603 +1,448 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Middle Value Calibration Script - STS Servo Middle Value Calibration Tool
-Functions:
-1. Connect port
-2. Scan all servos
-3. Disable all servos
-4. Read current angles of all servos
-5. Calibrate middle values (Set current position as 2048)
-6. Center all servos (Move to 2048)
+舵机中位校准工具 - 将当前舵机位置校准为中位(2048)
+Servo Middle Calibration - Set current servo position as center (2048)
+
+用法 / Usage:
+    python servo_middle_calibration.py          # 交互式选择端口 / Interactive port selection
+    python servo_middle_calibration.py <port>   # 指定端口 / Specify port
+    python servo_middle_calibration.py --list   # 列出可用端口 / List available ports
 """
 
 import sys
 import os
 import time
+from typing import Optional
 
-# --- SDK Import Logic ---
-# Add SCServo SDK path for standalone factory directory
+# 引入 SDK
 sys.path.append('.')
 sys.path.append('./scservo_sdk')
 
 try:
-    # Direct import from scservo_sdk - same as ez_tool.py
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
-    print("SCServo SDK imported successfully")
 except ImportError as e:
-    print(f"Error: Cannot import SCServo SDK: {e}")
-    print("Trying alternative import path...")
-
-    try:
-        # Alternative import path
-        from port_handler import PortHandler
-        from sms_sts import sms_sts
-        from scservo_def import COMM_SUCCESS
-        print("SCServo SDK imported successfully (alternative path)")
-    except ImportError as e2:
-        print(f"Error: Cannot import SCServo SDK (alternative): {e2}")
-
-        # If import fails, define necessary constants
-        COMM_SUCCESS = 0
-        print("Using fallback mode with COMM_SUCCESS =", COMM_SUCCESS)
-
-        # Create mock classes for testing
-        class PortHandler:
-            def __init__(self, port_name):
-                self.port_name = port_name
-            def openPort(self):
-                return False
-            def setBaudRate(self, rate):
-                return False
-            def closePort(self):
-                pass
-
-        class sms_sts:
-            def __init__(self, handler):
-                self.handler = handler
-            def ping(self, servo_id):
-                return 0, -1, 0
-            def ReadPos(self, servo_id):
-                return 0, -1, 0
-            def write1ByteTxRx(self, servo_id, address, value):
-                return -1, 0
-            def unLockEprom(self, servo_id):
-                return -1, 0
-            def LockEprom(self, servo_id):
-                return -1, 0
-            def WritePosEx(self, servo_id, position, speed, acc):
-                return -1, 0
-# --- End SDK Import Logic ---
+    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print("   Error: Cannot import SCServo SDK")
+    sys.exit(1)
 
 # 引入端口工具
 try:
-    from port_utils import get_default_port, list_ports_for_user
+    from port_utils import select_port_interactive, get_available_ports, list_ports_for_user
 except ImportError:
-    print("Warning: port_utils not found, using fallback port detection")
-    def get_default_port(index=0):
-        return None
+    print("❌ 错误: 未找到 port_utils")
+    print("   Error: port_utils not found")
+    sys.exit(1)
+
+# === 配置常量 ===
+BAUD_RATE = 1000000
+MIDDLE_POSITION = 2048  # 正确的中位值
+SMS_STS_TORQUE_ENABLE = 40  # 力矩开关地址（也是校准命令地址）
+SMS_STS_TORQUE_ON = 1
+SMS_STS_TORQUE_OFF = 0
+SMS_STS_CALIBRATE_MIDDLE = 128  # 校准命令：将当前位置设为2048
 
 
-# Define register addresses from documentation
-SMS_STS_TORQUE_ENABLE = 40        # Address for Torque switch AND calibration
-SMS_STS_TORQUE_ENABLE_VALUE = 1   # Value to enable torque
-SMS_STS_TORQUE_DISABLE_VALUE = 0  # Value to disable torque
-SMS_STS_CALIBRATE_MIDDLE_VALUE = 128 # **SPECIAL COMMAND: Set current pos as 2048**
-SMS_STS_MIDDLE_POSITION = 2048    # **The correct middle position (center)**
+def position_to_degrees(position: int) -> float:
+    """将位置值转换为角度"""
+    return position * 360.0 / 4096.0
 
 
-class MiddleValueCalibrator:
-    """STS Servo Middle Value Calibrator - Single Port Version"""
+def scan_servos(servo_handler) -> list:
+    """扫描端口上的所有舵机"""
+    found = []
+    for servo_id in range(1, 21):
+        model_number, result, error = servo_handler.ping(servo_id)
+        if result == COMM_SUCCESS:
+            found.append(servo_id)
+    return found
 
-    def __init__(self, port_name: str = None):
-        # Auto-detect default port using port_utils
-        if port_name is None:
-            port_name = get_default_port(0)
-        # Port configuration - single port only
-        self.port_name = port_name
-        self.port_handler = None
-        self.servo_handler = None
 
-        self.baud_rate = 1000000
-        self.servo_ids = [1, 2, 3, 4, 5, 6]  # Supported servo ID range
+def disable_servos(servo_handler, servo_list: list) -> int:
+    """失能所有舵机"""
+    disabled_count = 0
+    for servo_id in servo_list:
+        result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_TORQUE_OFF)
+        if result == COMM_SUCCESS:
+            disabled_count += 1
+        time.sleep(0.05)
+    return disabled_count
 
-    def log(self, message: str):
-        """Add log"""
-        timestamp = time.strftime("%H:%M:%S")
-        print(f"[{timestamp}] {message}")
 
-    def connect_port(self) -> bool:
-        """Connect single port"""
-        self.log(f"Connecting to {self.port_name}")
+def read_positions(servo_handler, servo_list: list) -> dict:
+    """读取所有舵机位置"""
+    positions = {}
+    for servo_id in servo_list:
+        position, result, error = servo_handler.ReadPos(servo_id)
+        if result == COMM_SUCCESS:
+            positions[servo_id] = position
+        time.sleep(0.05)
+    return positions
 
-        try:
-            self.port_handler = PortHandler(self.port_name)
-            if not self.port_handler.openPort():
-                self.log(f"X Cannot open {self.port_name}")
-                return False
-            if not self.port_handler.setBaudRate(self.baud_rate):
-                self.log(f"X Cannot set baud rate for {self.port_name}")
-                self.port_handler.closePort()
-                return False
-            self.servo_handler = sms_sts(self.port_handler)
-            self.log(f"+ {self.port_name} connected successfully")
-            return True
-        except Exception as e:
-            self.log(f"X {self.port_name} connection error: {e}")
+
+def calibrate_middle_offset(servo_handler, servo_id: int) -> bool:
+    """
+    校准单个舵机的中位偏移 - 将当前位置设为2048
+
+    流程：
+    1. 解锁 EEPROM
+    2. 发送校准命令（写128到地址40）
+    3. 重新锁定 EEPROM
+    """
+    try:
+        # 1. 解锁 EEPROM
+        result, error = servo_handler.unLockEprom(servo_id)
+        if result != COMM_SUCCESS:
+            print(f"    ❌ EEPROM解锁失败: {error}")
+            return False
+        time.sleep(0.1)
+
+        # 2. 发送校准命令（写128到地址40）
+        result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_CALIBRATE_MIDDLE)
+        if result != COMM_SUCCESS:
+            print(f"    ❌ 校准命令失败: {error}")
+            servo_handler.LockEprom(servo_id)
+            return False
+        time.sleep(0.1)
+
+        # 3. 重新锁定 EEPROM
+        result, error = servo_handler.LockEprom(servo_id)
+        if result != COMM_SUCCESS:
+            print(f"    ⚠️ EEPROM重新锁定失败: {error}")
+
+        return True
+
+    except Exception as e:
+        print(f"    ❌ 校准异常: {e}")
+        return False
+
+
+def center_servo(servo_handler, servo_id: int) -> bool:
+    """将单个舵机移动到中位"""
+    try:
+        # 吺动力矩
+        result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_TORQUE_ON)
+        if result != COMM_SUCCESS:
+            return False
+        time.sleep(0.05)
+
+        # 移动到中位
+        result, error = servo_handler.WritePosEx(servo_id, MIDDLE_POSITION, 1000, 50)
+        return result == COMM_SUCCESS
+
+    except Exception:
+        return False
+
+
+def interactive_calibration(port_name: str) -> bool:
+    """
+    交互式中位校准 - 逐步引导用户完成校准
+    """
+    print(f"\n{'='*55}")
+    print(f"🔧 舵机中位校准工具 / Servo Middle Calibration Tool")
+    print(f"{'='*55}")
+    print(f"端口 / Port: {port_name}")
+    print(f"{'='*55}\n")
+
+    # 初始化端口
+    try:
+        port_handler = PortHandler(port_name)
+        if not port_handler.openPort():
+            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            return False
+        if not port_handler.setBaudRate(BAUD_RATE):
+            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            port_handler.closePort()
             return False
 
-    def disconnect_port(self):
-        """Disconnect port"""
-        self.log(f"Disconnecting {self.port_name}")
+        servo_handler = sms_sts(port_handler)
+
+        # Step 1: 扫描舵机
+        print("📡 Step 1: 扫描舵机 / Scanning servos...")
+        found_servos = scan_servos(servo_handler)
+
+        if not found_servos:
+            print("❌ 未发现舵机 / No servos found")
+            port_handler.closePort()
+            return False
+
+        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
+
+    except Exception as e:
+        print(f"❌ 初始化异常 / Init error: {e}")
+        return False
+
+    try:
+        # Step 2: 失能舵机
+        print("⏹️ Step 2: 失能舵机（可手动旋转）/ Disable servos (free to rotate)")
         try:
-            if self.port_handler:
-                self.port_handler.closePort()
-                self.log(f"+ {self.port_name} disconnected")
+            confirm = input("是否失能舵机？(y/n): ").strip().lower()
+            if confirm in ['y', 'yes']:
+                count = disable_servos(servo_handler, found_servos)
+                print(f"✅ {count}/{len(found_servos)} 个舵机已失能 / {count}/{len(found_servos)} servos disabled\n")
+                time.sleep(1)
+            else:
+                print("⏭️ 跳过失能 / Skipped\n")
+        except (EOFError, KeyboardInterrupt):
+            print("⏭️ 跳过失能 / Skipped\n")
+
+        # Step 3: 读取当前位置
+        print("📍 Step 3: 读取当前位置 / Reading current positions...")
+        print("-" * 50)
+        positions_before = read_positions(servo_handler, found_servos)
+        for servo_id in found_servos:
+            if servo_id in positions_before:
+                pos = positions_before[servo_id]
+                deg = position_to_degrees(pos)
+                print(f"  ID{servo_id}: {pos:4d} ({deg:6.1f}°)")
+        print()
+
+        # Step 4: 提示用户手动调整位置
+        print("=" * 50)
+        print("📋 Step 4: 手动调整舵机位置")
+        print("   Manually adjust servos to desired center position")
+        print("=" * 50)
+        try:
+            input("调整完成后按回车继续 / Press Enter when ready...\n")
+        except (EOFError, KeyboardInterrupt):
+            print("⏭️ 用户取消 / User cancelled")
+            return False
+
+        # Step 5: 校准中位
+        print("🔧 Step 5: 校准中位（将当前位置设为2048）/ Calibrate middle (set current as 2048)")
+        print("-" * 50)
+
+        try:
+            confirm = input("确认校准？(y/n): ").strip().lower()
+            if confirm not in ['y', 'yes']:
+                print("⏭️ 取消校准 / Calibration cancelled")
+                return False
+        except (EOFError, KeyboardInterrupt):
+            print("⏭️ 取消校准 / Calibration cancelled")
+            return False
+
+        print("正在校准... / Calibrating...")
+        success_count = 0
+        for servo_id in found_servos:
+            print(f"  ID{servo_id}...", end=" ")
+            if calibrate_middle_offset(servo_handler, servo_id):
+                success_count += 1
+                print("✅ 成功 / Success")
+            else:
+                print("❌ 失败 / Failed")
+            time.sleep(0.1)
+
+        print(f"\n✅ {success_count}/{len(found_servos)} 个舵机校准完成 / {success_count}/{len(found_servos)} servos calibrated\n")
+        time.sleep(2)
+
+        # Step 6: 移动到中位测试
+        print("🎯 Step 6: 移动到中位测试 / Move to center for testing")
+        print("-" * 50)
+
+        try:
+            confirm = input("是否移动舵机到中位测试？(y/n): ").strip().lower()
+            if confirm not in ['y', 'yes']:
+                print("⏭️ 跳过测试 / Skipped testing")
+            else:
+                print("正在移动... / Moving...")
+                moved_count = 0
+                for servo_id in found_servos:
+                    if center_servo(servo_handler, servo_id):
+                        moved_count += 1
+                    time.sleep(0.1)
+
+                print(f"✅ {moved_count}/{len(found_servos)} 个舵机已移动到中位 / {moved_count}/{len(found_servos)} servos moved to center")
+                print("\n⏳ 等待3秒... / Waiting 3 seconds...")
+                time.sleep(3)
+
+                # 读取最终位置
+                print("\n📍 最终位置 / Final positions:")
+                print("-" * 50)
+                positions_after = read_positions(servo_handler, found_servos)
+                for servo_id in found_servos:
+                    if servo_id in positions_before and servo_id in positions_after:
+                        movement = positions_after[servo_id] - positions_before[servo_id]
+                        movement_deg = position_to_degrees(movement)
+                        final_deg = position_to_degrees(positions_after[servo_id])
+                        print(f"  ID{servo_id}: {positions_after[servo_id]:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+
+        except (EOFError, KeyboardInterrupt):
+            print("⏭️ 跳过测试 / Skipped testing")
+
+        # 完成
+        print()
+        print("=" * 50)
+        print("✅ 校准流程完成 / Calibration process complete!")
+        print("=" * 50)
+        print("💡 如果舵机保持原位（位移很小），说明校准成功")
+        print("   If servos stayed near original position, calibration is successful")
+        print("=" * 50)
+
+        return True
+
+    except Exception as e:
+        print(f"\n❌ 校准异常 / Calibration error: {e}")
+        return False
+    finally:
+        try:
+            port_handler.closePort()
         except:
             pass
 
-    def scan_servos(self) -> list:
-        """Scan all servos on single port with delay"""
-        self.log(f"Scanning servos on {self.port_name} with delay...")
-        found_servos = []
 
-        for servo_id in self.servo_ids:
-            try:
-                self.log(f"  Scanning ID:{servo_id}...")
-                model_number, result, error = self.servo_handler.ping(servo_id)
-                if result == COMM_SUCCESS:
-                    found_servos.append(servo_id)
-                    self.log(f"  + {self.port_name}: Found servo ID:{servo_id} Model:{model_number}")
-                else:
-                    self.log(f"  - ID:{servo_id}: No response")
-            except Exception as e:
-                self.log(f"  X ID:{servo_id}: Error {e}")
-                continue
+def auto_calibration(port_name: str) -> bool:
+    """
+    自动中位校准 - 快速模式
+    """
+    print(f"\n{'='*55}")
+    print(f"🔧 舵机中位校准工具（自动模式）/ Servo Middle Calibration (Auto)")
+    print(f"{'='*55}")
+    print(f"端口 / Port: {port_name}")
+    print(f"{'='*55}\n")
 
-            # Small delay between scans to avoid interference
-            time.sleep(0.1)
-
-        self.log(f"{self.port_name} scan complete - Found {len(found_servos)} servos: {found_servos}")
-        return found_servos
-
-    def disable_all_servos(self, servo_list: list) -> int:
-        """Disable all servos on the port (set torque to 0)"""
-        success_count = 0
-        self.log(f"Disabling all {self.port_name} servos (torque OFF): {servo_list}")
-
-        for servo_id in servo_list:
-            try:
-                self.log(f"  Disabling ID{servo_id}...")
-                # Write 0 to Addr 40
-                result, error = self.servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_TORQUE_DISABLE_VALUE)
-                if result == COMM_SUCCESS:
-                    success_count += 1
-                    self.log(f"  + ID{servo_id}: Torque OFF (free to rotate)")
-                else:
-                    self.log(f"  X ID{servo_id}: Failed to set torque OFF (result: {result}, error: {error})")
-            except Exception as e:
-                self.log(f"  X ID{servo_id}: Exception during torque OFF: {e}")
-
-            # Small delay between servos
-            time.sleep(0.05)
-
-        self.log(f"{self.port_name} torque disable complete: {success_count}/{len(servo_list)} servos")
-        return success_count
-
-    def read_servo_positions(self, servo_list: list) -> dict:
-        """Read current angles of all servos on the port"""
-        positions = {}
-        self.log(f"Reading current angles of all {self.port_name} servos...")
-
-        for servo_id in servo_list:
-            try:
-                self.log(f"  Reading ID{servo_id}...")
-                position, result, error = self.servo_handler.ReadPos(servo_id)
-                if result == COMM_SUCCESS:
-                    positions[servo_id] = position
-                    degrees = position * 360.0 / 4095.0
-                    self.log(f"  + ID{servo_id}: {position:4d} ({degrees:6.1f}°)")
-                else:
-                    self.log(f"  X ID{servo_id}: Read failed (result: {result}, error: {error})")
-            except Exception as e:
-                self.log(f"  X ID{servo_id}: Read exception: {e}")
-
-            # Small delay between reads
-            time.sleep(0.05)
-
-        self.log(f"{self.port_name} angle reading complete: {len(positions)}/{len(servo_list)} servos")
-        return positions
-
-    def write_middle_offset(self, servo_id: int) -> bool:
-        """
-        *** CORRECTED IMPLEMENTATION ***
-        Write current angle as servo middle offset (2048)
-        using the built-in servo command (Write 128 to Addr 40)
-        """
-        try:
-            self.log(f"Calibrating {self.port_name} ID{servo_id} - Setting current position as NEW CENTER (2048)")
-
-            # 1. Unlock EEPROM (Address 55) - crucial for saving the offset
-            # The SDK's unLockEprom() handles writing 0 to Addr 55
-            result, error = self.servo_handler.unLockEprom(servo_id)
-            if result != COMM_SUCCESS:
-                self.log(f"  X EEPROM unlock failed: {error}")
-                return False
-            self.log("  + EEPROM unlocked (Addr 55=0)")
-            time.sleep(0.1) # Wait for unlock
-
-            # 2. Send the "Calibrate Current Position to 2048" command
-            # This is: Write 128 to Address 40 (SMS_STS_TORQUE_ENABLE)
-            result, error = self.servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_CALIBRATE_MIDDLE_VALUE)
-            
-            if result != COMM_SUCCESS:
-                self.log(f"  X Calibration command (128 to Addr 40) failed: {error}")
-                # Try to re-lock EPROM even if write fails
-                self.servo_handler.LockEprom(servo_id)
-                return False
-
-            self.log("  + Calibration command sent. Servo now considers this position as 2048.")
-            time.sleep(0.1) # Wait for EPROM write
-
-            # 3. Re-lock EEPROM (Address 55)
-            # The SDK's LockEprom() handles writing 1 to Addr 55
-            result, error = self.servo_handler.LockEprom(servo_id)
-            if result != COMM_SUCCESS:
-                self.log(f"  ! EEPROM re-lock failed: {error}")
-            else:
-                self.log(f"  + EEPROM re-locked (Addr 55=1)")
-
-            self.log(f"  + ID{servo_id}: Middle value calibration complete")
-            return True
-
-        except Exception as e:
-            self.log(f"  X ID{servo_id}: Calibration exception: {e}")
+    # 初始化端口
+    try:
+        port_handler = PortHandler(port_name)
+        if not port_handler.openPort():
+            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            return False
+        if not port_handler.setBaudRate(BAUD_RATE):
+            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            port_handler.closePort()
             return False
 
-    def calibrate_middle_values(self, servo_list: list) -> int:
-        """
-        *** MODIFIED ***
-        Calibrate middle values for all servos on the port with interactive confirmation
-        (No longer needs the positions dictionary)
-        """
-        self.log(f"Ready to calibrate {self.port_name} servo middle values...")
+        servo_handler = sms_sts(port_handler)
 
-        # Display offset values for user confirmation
-        print("\n" + "=" * 50)
-        print("SETTING CURRENT POSITIONS AS NEW CENTER (2048):")
-        print("=" * 50)
-        print("This will write the *current* physical position of each servo")
-        print("as its new '2048' center point.")
-        print("Servos to be calibrated:")
-        for servo_id in sorted(servo_list):
-            print(f"  ID{servo_id}")
-        print("=" * 50)
+        # 扫描舵机
+        print("📡 扫描舵机 / Scanning servos...")
+        found_servos = scan_servos(servo_handler)
 
-        # Ask user for confirmation
-        try:
-            confirm = input("\nWrite these offset values to EEPROM? (y/n): ").strip().lower()
-            if confirm not in ['y', 'yes']:
-                self.log(f"User cancelled offset calibration for {self.port_name}")
-                return 0
-        except (EOFError, KeyboardInterrupt):
-            self.log(f"User cancelled offset calibration for {self.port_name}")
-            return 0
+        if not found_servos:
+            print("❌ 未发现舵机 / No servos found")
+            port_handler.closePort()
+            return False
 
-        self.log(f"User confirmed - Starting {self.port_name} servo middle value calibration...")
+        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
 
-        success_count = 0
-        # Iterate over the list of servos, not the old positions dictionary
-        for servo_id in sorted(servo_list):
-            if self.write_middle_offset(servo_id):
-                success_count += 1
-
-        self.log(f"{self.port_name} middle value calibration complete - Success: {success_count}/{len(servo_list)}")
-        return success_count
-
-    def center_servo(self, servo_id: int) -> bool:
-        """Center single servo to middle position (2048) with torque enabled"""
-        try:
-            self.log(f"  Centering ID{servo_id}...")
-
-            # Enable servo torque first
-            result, error = self.servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_TORQUE_ENABLE_VALUE)
-            if result != COMM_SUCCESS:
-                self.log(f"    X ID{servo_id}: Failed to enable torque (result: {result}, error: {error})")
-                return False
-
-            self.log(f"    + ID{servo_id}: Torque enabled")
-
-            # Small delay
-            time.sleep(0.05)
-
-            # Send center command (2048) - **CORRECTED FROM 2047**
-            result, error = self.servo_handler.WritePosEx(servo_id, SMS_STS_MIDDLE_POSITION, 1000, 50)
-            if result == COMM_SUCCESS:
-                self.log(f"  + {self.port_name} ID{servo_id}: Center command sent ({SMS_STS_MIDDLE_POSITION})")
-                return True
-            else:
-                self.log(f"    X ID{servo_id}: Center command failed (result: {result}, error: {error})")
-        except Exception as e:
-            self.log(f"    X ID{servo_id}: Centering exception: {e}")
-
+    except Exception as e:
+        print(f"❌ 初始化异常 / Init error: {e}")
         return False
 
-    def center_all_servos(self, servo_list: list) -> int:
-        """Center all servos on the port with torque enabled and interactive confirmation"""
-        # Ask user for confirmation before centering
+    try:
+        # 失能舵机
+        print("⏹️ 失能舵机 / Disabling servos...")
+        disable_servos(servo_handler, found_servos)
+        time.sleep(1)
+
+        # 提示手动调整
         print("\n" + "=" * 50)
-        print("CENTERING SERVOS:")
-        print("=" * 50)
-        print(f"Will center the following {self.port_name} servos:")
-        for servo_id in sorted(servo_list):
-            print(f"  ID{servo_id}: Enable torque and move to center ({SMS_STS_MIDDLE_POSITION})")
-        print("=" * 50)
-        print(f"WARNING: Servos will move to center position ({SMS_STS_MIDDLE_POSITION})!")
-        print("This is the test: If calibration worked, servos should NOT move.")
+        print("!!! 手动步骤 / MANUAL STEP !!!")
+        print(f"请手动将所有舵机 ({found_servos}) 调整到期望的中位位置")
+        print(f"Manually move all servos to desired center position")
+        input("调整完成后按回车 / Press Enter when ready...\n")
         print("=" * 50)
 
-        try:
-            confirm = input("\nCenter all servos now? (y/n): ").strip().lower()
-            if confirm not in ['y', 'yes']:
-                self.log(f"User cancelled centering for {self.port_name}")
-                return 0
-        except (EOFError, KeyboardInterrupt):
-            self.log(f"User cancelled centering for {self.port_name}")
-            return 0
+        # 读取当前位置
+        print("📍 读取当前位置 / Reading current positions...")
+        positions_before = read_positions(servo_handler, found_servos)
+        for servo_id in found_servos:
+            if servo_id in positions_before:
+                pos = positions_before[servo_id]
+                deg = position_to_degrees(pos)
+                print(f"  ID{servo_id}: {pos:4d} ({deg:6.1f}°)")
+        print()
 
-        self.log(f"User confirmed - Starting {self.port_name} all servos centering with torque enabled...")
-
+        # 校准
+        print("🔧 校准中位 / Calibrating middle...")
         success_count = 0
-        for servo_id in sorted(servo_list):
-            if self.center_servo(servo_id):
+        for servo_id in found_servos:
+            print(f"  ID{servo_id}...", end=" ")
+            if calibrate_middle_offset(servo_handler, servo_id):
                 success_count += 1
-
-            # Small delay between servos
+                print("✅")
+            else:
+                print("❌")
             time.sleep(0.1)
 
-        self.log(f"{self.port_name} centering complete: {success_count}/{len(servo_list)} servos")
-        return success_count
-
-    def run_interactive_calibration(self):
-        """Run interactive middle value calibration process with step-by-step control"""
-        print("=" * 60)
-        print(f"Interactive Middle Value Calibration Tool - {self.port_name}")
-        print("=" * 60)
-        print("Step-by-step control - Each step requires confirmation")
-        print("=" * 60)
-
-        # 1. Connect port
-        try:
-            confirm = input(f"\nStep 1: Connect to {self.port_name}? (y/n): ").strip().lower()
-            if confirm not in ['y', 'yes']:
-                self.log("User cancelled connection")
-                return False
-        except (EOFError, KeyboardInterrupt):
-            self.log("User cancelled connection")
-            return False
-
-        if not self.connect_port():
-            self.log("Connection failed, process terminated")
-            return False
-
-        # 2. Scan servos on port
-        try:
-            confirm = input(f"\nStep 2: Scan for servos on {self.port_name}? (y/n): ").strip().lower()
-            if confirm not in ['y', 'yes']:
-                self.log("User cancelled scanning")
-                self.disconnect_port()
-                return False
-        except (EOFError, KeyboardInterrupt):
-            self.log("User cancelled scanning")
-            self.disconnect_port()
-            return False
-
-        found_servos = self.scan_servos()
-        if not found_servos:
-            self.log("No servos found, process terminated")
-            self.disconnect_port()
-            return False
-
-        # 3. Disable all servos on the port
-        try:
-            confirm = input(f"\nStep 3: Disable torque on {len(found_servos)} servos (free to rotate)? (y/n): ").strip().lower()
-            if confirm not in ['y', 'yes']:
-                self.log("User skipped torque disable")
-            else:
-                self.disable_all_servos(found_servos)
-                time.sleep(1)
-        except (EOFError, KeyboardInterrupt):
-            self.log("User skipped torque disable")
-
-        # 4. Read current angles of all servos on the port
-        # (This is just for user info, not strictly required for new calibration)
-        try:
-            confirm = input(f"\nStep 4: Read current angles of {len(found_servos)} servos? (y/n): ").strip().lower()
-            if confirm not in ['y', 'yes']:
-                self.log("User skipped angle reading")
-            else:
-                self.read_servo_positions(found_servos)
-        except (EOFError, KeyboardInterrupt):
-            self.log("User skipped angle reading")
-
-        # 5. Calibrate middle values for all servos on the port
-        # *** MODIFIED ***
-        calibrate_success = 0
-        try:
-            confirm = input(f"\nStep 5: Proceed with offset calibration? (y/n): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                # Call the modified function with the LIST of servos
-                calibrate_success = self.calibrate_middle_values(found_servos)
-                time.sleep(2)
-            else:
-                self.log("User skipped offset calibration")
-        except (EOFError, KeyboardInterrupt):
-            self.log("User skipped offset calibration")
-
-        # 6. Center all servos on the port
-        center_count = 0
-        try:
-            confirm = input(f"\nStep 6: Center {len(found_servos)} servos (will move!)? (y/n): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                center_count = self.center_all_servos(found_servos)
-            else:
-                self.log("User skipped centering")
-        except (EOFError, KeyboardInterrupt):
-            self.log("User skipped centering")
-
-        # Completion message
-        self.log("\n" + "=" * 60)
-        self.log("Interactive calibration process finished!")
-        self.log(f"{self.port_name}: Found {len(found_servos)} servos, Calibrated {calibrate_success}, Centered {center_count}")
-        self.log("Please observe if servos are correctly centered (i.e., did not move in Step 6)")
-        self.log("=" * 60)
-
-        return True
-
-    def run_full_calibration(self):
-        """Run complete middle value calibration process (non-interactive)"""
-        print("=" * 60)
-        print(f"Auto Middle Value Calibration Tool - {self.port_name}")
-        print("=" * 60)
-        print("Automatic execution - No interactive prompts")
-        print("=" * 60)
-
-        # 1. Connect port
-        if not self.connect_port():
-            self.log("Connection failed, process terminated")
-            return False
-
-        # 2. Scan servos on port
-        found_servos = self.scan_servos()
-        if not found_servos:
-            self.log("No servos found, process terminated")
-            self.disconnect_port()
-            return False
-
-        # 3. Disable all servos on the port
-        self.log(f"\nStep 3: Disable all {self.port_name} servos")
-        self.disable_all_servos(found_servos)
-        time.sleep(1)
-        
-        print("\n" + "=" * 50)
-        print("!!! MANUAL STEP !!!")
-        print(f"Please manually move all servos ({found_servos}) to their desired center positions.")
-        input("Press Enter when ready to calibrate...")
-        print("=" * 50)
-
-
-        # 4. Read current angles (Optional, for logging)
-        self.log(f"\nStep 4: Read current angles of all {self.port_name} servos (for info)")
-        self.read_servo_positions(found_servos)
-
-        # 5. Calibrate middle values
-        # *** MODIFIED ***
-        self.log(f"\nStep 5: Calibrate middle values for all {self.port_name} servos")
-        calibrate_success = 0
-        if found_servos:
-             # Call the modified function with the LIST of servos
-            calibrate_success = self.calibrate_middle_values(found_servos)
-        else:
-            self.log(f"{self.port_name} no servos, skipping calibration")
-
-        # Wait for calibration completion
+        print(f"\n✅ {success_count}/{len(found_servos)} 个舵机校准完成\n")
         time.sleep(2)
 
-        # 6. Center all servos on the port
-        self.log(f"\nStep 6: Center all {self.port_name} servos (Test calibration)")
-        center_count = 0
-        if found_servos:
-            center_count = self.center_all_servos(found_servos)
-        else:
-            self.log(f"{self.port_name} no servos, skipping centering")
+        # 移动到中位测试
+        print("🎯 移动到中位测试 / Move to center for testing...")
+        for servo_id in found_servos:
+            center_servo(servo_handler, servo_id)
+            time.sleep(0.1)
 
-        # Completion message
-        self.log("\n" + "=" * 60)
-        self.log("Auto calibration process finished!")
-        self.log(f"{self.port_name}: Found {len(found_servos)} servos, Calibrated {calibrate_success}, Centered {center_count}")
-        self.log("Please observe if servos are correctly centered (i.e., did not move in Step 6)")
-        self.log("=" * 60)
+        print("⏳ 等待3秒... / Waiting 3 seconds...")
+        time.sleep(3)
+
+        # 读取最终位置
+        print("\n📍 最终位置 / Final positions:")
+        positions_after = read_positions(servo_handler, found_servos)
+        for servo_id in found_servos:
+            if servo_id in positions_before and servo_id in positions_after:
+                movement = positions_after[servo_id] - positions_before[servo_id]
+                movement_deg = position_to_degrees(movement)
+                final_deg = position_to_degrees(positions_after[servo_id])
+                print(f"  ID{servo_id}: {positions_after[servo_id]:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+
+        print()
+        print("=" * 50)
+        print("✅ 校准完成 / Calibration complete!")
+        print("=" * 50)
 
         return True
+
+    except Exception as e:
+        print(f"\n❌ 校准异常 / Calibration error: {e}")
+        return False
+    finally:
+        try:
+            port_handler.closePort()
+        except:
+            pass
 
 
 def main():
-    """Main function"""
-    import sys
-
-    # Auto-detect default port
-    default_port = get_default_port(0)
-    if not default_port:
-        print("Error: No serial ports found!")
-        print("Please connect a USB-to-Serial adapter and try again.")
-        sys.exit(1)
-
-    print("Middle Value Calibration Tool v2.1 (Corrected Logic)")
-    print("Function: STS servo middle value calibration and centering")
-    print(f"Method: Use built-in command (Write 128 to Addr 40) to set center as {SMS_STS_MIDDLE_POSITION}")
-    print("Based: scservo_sdk SMS_STS protocol")
-    print("=" * 50)
-    print(f"\nAuto-detected port: {default_port}")
-    print()
-
-    # Get port from user input
+    """主函数"""
+    # 解析参数
     if len(sys.argv) > 1:
-        port_name = sys.argv[1]
-        print(f"Using port from command line: {port_name}")
+        if sys.argv[1] == "--list":
+            print("=== 可用串口 / Available Serial Ports ===")
+            print(list_ports_for_user())
+            return
+        else:
+            port_name = sys.argv[1]
+            print(f"🔌 使用指定端口 / Using specified port: {port_name}")
     else:
-        user_input = input(f"Press Enter to use {default_port}, or type a different port: ").strip()
-        port_name = user_input if user_input else default_port
-        print(f"Using port: {port_name}")
+        # 交互式选择端口
+        port_name = select_port_interactive("选择校准串口 / Select port to calibrate")
+        if not port_name:
+            print("❌ 未选择端口 / No port selected")
+            sys.exit(1)
 
-    # Ask user for mode selection
+    # 选择模式
     print("\n" + "=" * 50)
-    print("SELECT MODE:")
+    print("选择模式 / Select Mode:")
     print("=" * 50)
-    print("1. Interactive mode - Step by step with confirmation")
-    print("2. Auto mode - Asks for confirmation before each major step")
+    print("1. 交互式模式 / Interactive mode (逐步引导)")
+    print("2. 自动模式 / Auto mode (快速执行)")
     print("=" * 50)
 
     try:
-        mode_choice = input("Select mode (1=Interactive, 2=Auto): ").strip()
-        if mode_choice == "1":
-            interactive_mode = True
-            print("Selected: Interactive mode")
-        else:
-            interactive_mode = False
-            print("Selected: Auto mode (default)")
+        mode = input("选择模式 (1/2) / Select mode (1/2): ").strip()
     except (EOFError, KeyboardInterrupt):
-        interactive_mode = False
-        print("Using: Auto mode (default)")
+        mode = "2"
 
-    print("=" * 50)
+    # 执行校准
+    if mode == "1":
+        success = interactive_calibration(port_name)
+    else:
+        success = auto_calibration(port_name)
 
-    calibrator = MiddleValueCalibrator(port_name)
-
-    try:
-        if interactive_mode:
-            # Run interactive calibration process
-            success = calibrator.run_interactive_calibration()
-        else:
-            # Run "automatic" calibration process
-            # Note: This modified auto-mode still has user confirmation prompts
-            # inside calibrate_middle_values() and center_all_servos()
-            # It also has a manual 'Press Enter' step
-            success = calibrator.run_full_calibration()
-
-        if success:
-            input("\nProcess finished. Press Enter to exit...")
-        else:
-            input("\nProcess failed or cancelled. Press Enter to exit...")
-
-    except KeyboardInterrupt:
-        print("\nUser interrupted")
-    except Exception as e:
-        print(f"Runtime exception: {e}")
-        input("Press Enter to exit...")
-    finally:
-        calibrator.disconnect_port()
+    sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":
