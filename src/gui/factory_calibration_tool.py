@@ -31,7 +31,7 @@ from scservo_sdk.scservo_def import COMM_SUCCESS
 
 # 引入端口工具
 try:
-    from port_utils import get_default_port, get_available_ports
+    from src.port_utils import get_default_port, get_available_ports
     PORT_UTILS_AVAILABLE = True
 except ImportError:
     PORT_UTILS_AVAILABLE = False
@@ -1754,7 +1754,7 @@ class EZToolUI(QMainWindow):
 def get_available_ports():
     """获取可用串口列表 - 使用 port_utils 中已过滤的端口"""
     try:
-        from port_utils import get_available_ports as get_ports
+        from src.port_utils import get_available_ports as get_ports
         ports = get_ports()
         return [p.device for p in ports]
     except ImportError:

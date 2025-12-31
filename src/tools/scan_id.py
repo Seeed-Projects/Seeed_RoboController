@@ -14,8 +14,8 @@ import sys
 import os
 
 # 引入 SDK
-sys.path.append('.')
-sys.path.append('./scservo_sdk')
+sys.path.append('../..')
+sys.path.append('../../scservo_sdk')
 
 try:
     from scservo_sdk.port_handler import PortHandler
@@ -28,7 +28,7 @@ except ImportError:
 
 # 引入端口工具
 try:
-    from port_utils import select_port_interactive, list_ports_for_user
+    from src.port_utils import select_port_interactive, list_ports_for_user
 except ImportError:
     print("❌ 错误: 未找到 port_utils。请确保 port_utils.py 在当前目录下。")
     print("   Error: port_utils not found. Make sure port_utils.py is in current directory.")

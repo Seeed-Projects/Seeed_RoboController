@@ -6,8 +6,8 @@ import time
 import os
 
 # 确保能找到 scservo_sdk
-sys.path.append('.')
-sys.path.append('./scservo_sdk')
+sys.path.append('../..')
+sys.path.append('../../scservo_sdk')
 
 try:
     from scservo_sdk.port_handler import PortHandler

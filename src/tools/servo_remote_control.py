@@ -26,8 +26,8 @@ import argparse
 from typing import Optional
 
 # 引入 SDK
-sys.path.append('.')
-sys.path.append('./scservo_sdk')
+sys.path.append('../..')
+sys.path.append('../../scservo_sdk')
 
 try:
     from scservo_sdk.port_handler import PortHandler
@@ -40,7 +40,7 @@ except ImportError as e:
 
 # 引入端口工具
 try:
-    from port_utils import select_port_interactive, get_available_ports, list_ports_for_user
+    from src.port_utils import select_port_interactive, get_available_ports, list_ports_for_user
 except ImportError:
     print("❌ 错误: 未找到 port_utils")
     print("   Error: port_utils not found")
