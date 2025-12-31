@@ -59,14 +59,8 @@ class RemoteControlWorker(QObject):
             return False, "遥控操作已在运行"
 
         try:
-            # 构建超快遥控脚本的路径
-            remote_script_path = os.path.join(os.path.dirname(__file__), 'servo_remote_control.py')
-
-            if not os.path.exists(remote_script_path):
-                return False, f"遥控脚本不存在: {remote_script_path}"
-
-            # 构建命令参数
-            command = [sys.executable, remote_script_path]
+            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
+            command = [sys.executable, '-m', 'src.tools.servo_remote_control']
             if self.read_port:
                 command.extend(['--read-port', self.read_port])
             if self.control_port:
@@ -1302,9 +1296,8 @@ class EZToolUI(QMainWindow):
 
     def run_middle_calibration(self, port_name: str):
         """运行指定端口的中值校准"""
-        # 直接执行指定端口的中间值校准脚本
-        cali_script_path = os.path.join(os.path.dirname(__file__), 'servo_middle_calibration.py')
-        command = [sys.executable, cali_script_path, port_name]
+        # 使用 -m 模块方式运行，确保能找到 scservo_sdk
+        command = [sys.executable, '-m', 'src.tools.servo_middle_calibration', port_name]
 
         self.add_remote_log(f"🚀 启动{port_name}中间值校准...")
         print(f"[CAL] Starting calibration for {port_name}")
@@ -1380,16 +1373,18 @@ class EZToolUI(QMainWindow):
         """执行快速中位校准的线程函数"""
         try:
             self.add_remote_log(f"🔍 查找校准脚本...")
-            script_path = os.path.join(os.path.dirname(__file__), 'servo_quick_calibration.py')
+            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
 
-            # 如果servo_quick_calibration.py不存在，尝试使用servo_middle_calibration.py
-            if not os.path.exists(script_path):
-                script_path = os.path.join(os.path.dirname(__file__), 'servo_middle_calibration.py')
-                self.add_remote_log(f"⚠️ 未找到servo_quick_calibration.py，使用servo_middle_calibration.py")
-                command = [sys.executable, script_path, port_name, "2"]  # 使用自动模式
-            else:
+            # 检查使用哪个脚本
+            tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools')
+            quick_script = os.path.join(tools_dir, 'servo_quick_calibration.py')
+
+            if os.path.exists(quick_script):
                 self.add_remote_log(f"✅ 找到校准脚本: servo_quick_calibration.py")
-                command = [sys.executable, script_path, port_name]
+                command = [sys.executable, '-m', 'src.tools.servo_quick_calibration', port_name]
+            else:
+                self.add_remote_log(f"⚠️ 未找到servo_quick_calibration.py，使用servo_middle_calibration.py")
+                command = [sys.executable, '-m', 'src.tools.servo_middle_calibration', port_name, "2"]  # 使用自动模式
 
             self.add_remote_log(f"🚀 启动校准进程: {' '.join(command)}")
 
@@ -1399,7 +1394,7 @@ class EZToolUI(QMainWindow):
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                cwd=os.path.dirname(__file__)
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
 
             # 监控输出
@@ -1480,8 +1475,8 @@ class EZToolUI(QMainWindow):
     def _execute_quick_test(self, port_name: str):
         """执行快速中位测试的线程函数"""
         try:
-            script_path = os.path.join(os.path.dirname(__file__), 'servo_center_test.py')
-            command = [sys.executable, script_path, port_name]
+            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
+            command = [sys.executable, '-m', 'src.tools.servo_center_test', port_name]
 
             process = subprocess.Popen(
                 command,
@@ -1489,7 +1484,7 @@ class EZToolUI(QMainWindow):
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                cwd=os.path.dirname(__file__)
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
 
             # 监控输出
@@ -1560,8 +1555,12 @@ class EZToolUI(QMainWindow):
     def _execute_quick_disable(self, port_name: str):
         """执行快速失能电机的线程函数"""
         try:
-            script_path = os.path.join(os.path.dirname(__file__), 'servo_disable.py')
-            command = [sys.executable, script_path, port_name]
+            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
+            command = [sys.executable, '-m', 'src.tools.servo_disable', port_name]
+
+            self.add_remote_log(f"🚀 启动失能进程: {' '.join(command)}")
+            print(f"[DEBUG DISABLE] Port name: {port_name}")
+            print(f"[DEBUG DISABLE] Full command: {command}")
 
             process = subprocess.Popen(
                 command,
@@ -1569,10 +1568,11 @@ class EZToolUI(QMainWindow):
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                cwd=os.path.dirname(__file__)
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
 
-            # 监控输出
+            # 监控输出 - 显示重要信息
+            important_keywords = ["连接", "扫描", "失能", "完成", "失败", "错误", "成功", "发现", "扭矩", "旋转"]
             while process.poll() is None:
                 try:
                     line = process.stdout.readline()
@@ -1580,14 +1580,19 @@ class EZToolUI(QMainWindow):
                         line = line.strip()
                         if line:
                             print(f"[{port_name} DISABLE] {line}")
+                            # 只显示包含重要关键词的日志
+                            if any(keyword in line for keyword in important_keywords):
+                                self.add_remote_log(f"[{port_name}] {line}")
                 except:
                     break
 
             return_code = process.wait()
             if return_code == 0:
                 self.add_remote_log(f"✅ {port_name}电机已失能，可手动旋转")
+                self.status_bar.showMessage(f"{port_name}失能完成", 3000)
             else:
-                self.add_remote_log(f"❌ {port_name}失能失败")
+                self.add_remote_log(f"❌ {port_name}失能失败 - 退出码: {return_code}")
+                self.status_bar.showMessage(f"{port_name}失能失败", 3000)
 
             # 重新启动相应端口的扫描线程
             import time
@@ -1602,14 +1607,17 @@ class EZToolUI(QMainWindow):
 
         except Exception as e:
             self.add_remote_log(f"❌ {port_name}失能异常: {e}")
+            self.status_bar.showMessage(f"{port_name}失能异常: {e}", 3000)
             # 即使出现异常也要尝试重新启动扫描线程
             try:
                 import time
                 time.sleep(0.5)
                 if port_name == self.left_port:
                     self.left_panel.worker.start()
+                    self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
                 elif port_name == self.right_port:
                     self.right_panel.worker.start()
+                    self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
             except:
                 pass
 
