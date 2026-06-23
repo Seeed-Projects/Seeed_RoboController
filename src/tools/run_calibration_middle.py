@@ -16,7 +16,16 @@ import sys
 import os
 import time
 import argparse
+import io
 from pathlib import Path
+
+# 解决 Windows 下 stdout 被重定向到管道时使用 GBK 编码导致 emoji 输出报错
+if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # 引入 SDK
 sys.path.append('../..')

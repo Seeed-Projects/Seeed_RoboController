@@ -31,6 +31,14 @@ from scservo_sdk.port_handler import PortHandler
 from scservo_sdk.sms_sts import sms_sts
 from scservo_sdk.scservo_def import COMM_SUCCESS
 
+# 引入主题工具，强制浅色主题以避免 Windows 深色模式下文字看不见
+try:
+    from src.gui.theme_utils import setup_light_theme
+    THEME_UTILS_AVAILABLE = True
+except ImportError:
+    THEME_UTILS_AVAILABLE = False
+    print("Warning: theme_utils not found, UI may be unreadable in dark mode")
+
 # 引入端口工具
 try:
     from src.port_utils import get_default_port, get_available_ports
@@ -83,6 +91,8 @@ class RemoteControlWorker(QObject):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 cwd=self.project_root
             )
@@ -158,6 +168,23 @@ class IDChangeDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("修改舵机ID")
         self.setMinimumWidth(280)
+        self.setStyleSheet("""
+            QDialog { background-color: #f8f9fa; color: #212529; }
+            QLabel { color: #212529; font-size: 12px; }
+            QComboBox {
+                background-color: #ffffff; color: #212529; border: 1px solid #ced4da;
+                padding: 4px; border-radius: 4px;
+            }
+            QSpinBox {
+                background-color: #ffffff; color: #212529; border: 1px solid #ced4da;
+                padding: 4px; border-radius: 4px;
+            }
+            QDialogButtonBox QPushButton {
+                background-color: #007bff; color: white; padding: 5px 15px;
+                border-radius: 4px; font-weight: bold;
+            }
+            QDialogButtonBox QPushButton:hover { background-color: #0056b3; }
+        """)
 
         layout = QFormLayout(self)
 
@@ -738,7 +765,7 @@ class ServoPanel(QWidget):
             btn.setMinimumHeight(60)
             btn.setMinimumWidth(80)
             btn.setStyleSheet("font-size: 24px;")
-            btn.clicked.connect(lambda checked, slot=i: self.change_servo_id(slot))
+            btn.clicked.connect(lambda slot=i: self.change_servo_id(slot))
             btn.setEnabled(False)
 
             self.id_buttons.append(btn)
@@ -857,10 +884,13 @@ class ServoPanel(QWidget):
 
     def change_servo_id(self, slot_index):
         """修改舵机ID - 弹出对话框让用户自定义源ID和目标ID"""
+        print(f"[DEBUG {self.port_id}] change_servo_id called for slot {slot_index}")
         if self.worker is None:
+            print(f"[DEBUG {self.port_id}] worker is None, aborting")
             QMessageBox.warning(self, "警告", "当前端口已禁用，无法修改ID")
             return
         if not self.worker.current_servos:
+            print(f"[DEBUG {self.port_id}] current_servos empty, aborting")
             QMessageBox.warning(self, "警告", "没有可用的舵机进行ID修改")
             return
 
@@ -885,29 +915,44 @@ class ServoPanel(QWidget):
 
         old_id, new_id = dialog.get_values()
 
+        msg_box_style = """
+            QMessageBox { background-color: #f8f9fa; color: #212529; }
+            QMessageBox QLabel { color: #212529; }
+            QMessageBox QPushButton {
+                background-color: #007bff; color: white; padding: 5px 15px;
+                border-radius: 4px; font-weight: bold;
+            }
+            QMessageBox QPushButton:hover { background-color: #0056b3; }
+        """
+
         if old_id == new_id:
-            QMessageBox.information(self, "提示", "源ID和目标ID相同，无需修改")
+            box = QMessageBox(self)
+            box.setWindowTitle("提示")
+            box.setText("源ID和目标ID相同，无需修改")
+            box.setStyleSheet(msg_box_style)
+            box.exec()
             return
 
         if new_id in self.worker.current_servos and new_id != old_id:
-            reply = QMessageBox.question(
-                self,
-                "确认覆盖",
-                f"目标ID {new_id} 已存在其他舵机，是否继续？\n继续可能导致总线ID冲突！",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
+            box = QMessageBox(self)
+            box.setWindowTitle("确认覆盖")
+            box.setText(f"目标ID {new_id} 已存在其他舵机，是否继续？")
+            box.setInformativeText("继续可能导致总线ID冲突！")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.No)
+            box.setStyleSheet(msg_box_style)
+            if box.exec() != QMessageBox.Yes:
                 return
 
         # 确认对话框
-        reply = QMessageBox.question(
-            self,
-            f"确认修改ID ({self.port_name})",
-            f"确定要将舵机 ID {old_id} 修改为 ID {new_id} 吗？\n\n系统将自动暂停扫描确保修改成功。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        box = QMessageBox(self)
+        box.setWindowTitle(f"确认修改ID ({self.port_name})")
+        box.setText(f"确定要将舵机 ID {old_id} 修改为 ID {new_id} 吗？")
+        box.setInformativeText("系统将自动暂停扫描确保修改成功。")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        box.setStyleSheet(msg_box_style)
+        reply = box.exec()
 
         if reply == QMessageBox.Yes:
             self.add_log(f"🎯 提交ID修改请求: {old_id} -> {new_id}", self.port_id)
@@ -1525,6 +1570,8 @@ class EZToolUI(QMainWindow):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(__file__))
             )
@@ -1601,6 +1648,8 @@ class EZToolUI(QMainWindow):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
@@ -1691,6 +1740,8 @@ class EZToolUI(QMainWindow):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
@@ -1742,10 +1793,10 @@ class EZToolUI(QMainWindow):
         self.status_bar.showMessage(f"正在执行{port_name}失能电机...", 5000)
 
         # 先停止相应端口的工作线程，避免端口冲突
-        if port_name == self.left_port and self.left_panel.worker.is_connected:
+        if port_name == self.left_port and self.left_panel.worker and self.left_panel.worker.is_connected:
             self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备失能")
             self.left_panel.worker.stop()
-        elif port_name == self.right_port and self.right_panel.worker.is_connected:
+        elif port_name == self.right_port and self.right_panel.worker and self.right_panel.worker.is_connected:
             self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备失能")
             self.right_panel.worker.stop()
 
@@ -1775,6 +1826,8 @@ class EZToolUI(QMainWindow):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
@@ -1806,10 +1859,10 @@ class EZToolUI(QMainWindow):
             import time
             time.sleep(0.5)  # 等待端口完全释放
 
-            if port_name == self.left_port:
+            if port_name == self.left_port and self.left_panel.worker:
                 self.left_panel.worker.start()
                 self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
-            elif port_name == self.right_port:
+            elif port_name == self.right_port and self.right_panel.worker:
                 self.right_panel.worker.start()
                 self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
 
@@ -1820,10 +1873,10 @@ class EZToolUI(QMainWindow):
             try:
                 import time
                 time.sleep(0.5)
-                if port_name == self.left_port:
+                if port_name == self.left_port and self.left_panel.worker:
                     self.left_panel.worker.start()
                     self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
-                elif port_name == self.right_port:
+                elif port_name == self.right_port and self.right_panel.worker:
                     self.right_panel.worker.start()
                     self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
             except:
@@ -2403,6 +2456,8 @@ class EZToolUI(QMainWindow):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 cwd=project_root
             )
@@ -2439,7 +2494,24 @@ class EZToolUI(QMainWindow):
                         self.calibration_log.emit(line)
                 time.sleep(0.1)
 
-            # 进程结束
+            # 进程结束，读取剩余输出（包含崩溃时的 Traceback）
+            try:
+                remaining_stdout, remaining_stderr = self.calibration_process.communicate(timeout=5)
+                if remaining_stdout:
+                    for line in remaining_stdout.splitlines():
+                        line = line.strip()
+                        if line:
+                            print(f"[CALIB MIDDLE] {line}")
+                            self.calibration_log.emit(line)
+                if remaining_stderr:
+                    for line in remaining_stderr.splitlines():
+                        line = line.strip()
+                        if line:
+                            print(f"[CALIB MIDDLE ERR] {line}")
+                            self.calibration_log.emit(f"❌ {line}")
+            except subprocess.TimeoutExpired:
+                pass
+
             return_code = self.calibration_process.poll()
             self.calibration_state_changed.emit("finished", return_code)
 
@@ -2950,6 +3022,10 @@ def main():
     import platform
     import argparse
 
+    # Windows 下子进程默认可能使用 GBK 编码，导致脚本里的 emoji 输出报错。
+    # 强制子进程使用 utf-8 编码标准输出。
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='双串口工厂舵机标定工具')
     parser.add_argument('--port1', type=str, help='指定串口1 (例如: COM1 或 /dev/ttyUSB0)')
@@ -2971,7 +3047,10 @@ def main():
         return
 
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')
+    if THEME_UTILS_AVAILABLE:
+        setup_light_theme(app)
+    else:
+        app.setStyle('Fusion')
 
     # 根据操作系统选择默认端口
     system = platform.system()

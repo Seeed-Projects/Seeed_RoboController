@@ -9,6 +9,7 @@ import sys
 import os
 import time
 import json
+import platform
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -42,6 +43,11 @@ except ImportError:
     print("❌ 无法导入 calibration_manager")
     sys.exit(1)
 
+try:
+    from src.gui.theme_utils import setup_light_theme
+except ImportError:
+    setup_light_theme = None
+
 
 BAUD_RATE = 1000000
 TORQUE_ENABLE_ADDR = 40
@@ -60,6 +66,29 @@ ID_TO_JOINT = {
 
 # 连续旋转关节
 CONTINUOUS_JOINTS = {"wrist_roll"}
+
+
+def get_chinese_font(size=10, bold=False):
+    """返回跨平台可用的中文字体。
+
+    Ubuntu 下通常有 Noto Sans CJK / WenQuanYi 等回退字体，Qt 能正常显示中文；
+    Windows 下如果显式使用西文字体（如 Consolas）显示中文表头，会出现缺字/空白。
+    这里按平台选择主字体，并设置 SansSerif 风格提示以便自动回退。
+    """
+    system = platform.system()
+    if system == "Windows":
+        family = "Microsoft YaHei"
+    elif system == "Darwin":
+        family = "PingFang SC"
+    else:
+        # Linux / Ubuntu 等
+        family = "Noto Sans CJK SC"
+
+    font = QFont(family, size)
+    font.setStyleHint(QFont.SansSerif)
+    if bold:
+        font.setBold(True)
+    return font
 
 
 class PositionReader(QObject):
@@ -126,6 +155,7 @@ class CalibrationWizard(QDialog):
             title += " (基于现有文件)"
         self.setWindowTitle(title)
         self.setMinimumSize(900, 650)
+        self.setFont(get_chinese_font(10))
 
         # 串口对象
         self.port_handler = None
@@ -180,7 +210,7 @@ class CalibrationWizard(QDialog):
         self.joints_table.setAlternatingRowColors(True)
         self.joints_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.joints_table.verticalHeader().setVisible(False)
-        self.joints_table.setFont(QFont("Consolas", 10))
+        self.joints_table.setFont(get_chinese_font(10))
 
         # 初始化行
         for i, servo_id in enumerate(range(1, 7)):
@@ -324,7 +354,7 @@ class CalibrationWizard(QDialog):
         self.id_input = QLineEdit()
         self.id_input.setMinimumHeight(35)
         self.id_input.setMinimumWidth(220)
-        self.id_input.setFont(QFont("Consolas", 12))
+        self.id_input.setFont(get_chinese_font(12))
         self.id_input.setStyleSheet("""
             QLineEdit {
                 color: #212529;
@@ -349,7 +379,7 @@ class CalibrationWizard(QDialog):
         self.save_btn = QPushButton("💾 保存校准文件")
         self.save_btn.setStyleSheet(self._button_style("#6f42c1"))
         self.save_btn.setMinimumHeight(55)
-        self.save_btn.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+        self.save_btn.setFont(get_chinese_font(12, bold=True))
         self.save_btn.clicked.connect(self.save_calibration)
         control_layout.addWidget(self.save_btn)
 
@@ -386,8 +416,12 @@ class CalibrationWizard(QDialog):
         item = QTableWidgetItem(text)
         if align:
             item.setTextAlignment(align)
+        # 显式设置前景/背景色，避免在 Windows 深色主题下继承黑色背景导致文字看不见
         if color:
             item.setForeground(QColor(color))
+        else:
+            item.setForeground(QColor("#212529"))
+        item.setBackground(QColor("#ffffff"))
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         return item
 
@@ -586,13 +620,19 @@ class CalibrationWizard(QDialog):
                 status_item.setForeground(QColor("#dc3545"))
 
         # 高亮当前行
+        # 显式设置每个单元格的背景/前景，避免 Windows 深色主题下出现黑色背景
         for i in range(len(self.joints)):
             for col in range(6):
                 item = self.joints_table.item(i, col)
                 if i == self.current_joint_index:
                     item.setBackground(QColor("#fff3cd"))
                 else:
-                    item.setBackground(QColor("white"))
+                    # 交替行颜色：白 / 浅灰
+                    item.setBackground(QColor("#ffffff" if i % 2 == 0 else "#f8f9fa"))
+
+                # 状态列保留自定义颜色，其他列统一深色文字
+                if col != 5:
+                    item.setForeground(QColor("#212529"))
 
         # 更新当前位置大字
         current_joint = self.joints[self.current_joint_index]
@@ -950,6 +990,8 @@ class CalibrationWizard(QDialog):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    if setup_light_theme:
+        setup_light_theme(app)
     wizard = CalibrationWizard("/dev/ttyACM0", "follower")
     wizard.show()
     sys.exit(app.exec())
