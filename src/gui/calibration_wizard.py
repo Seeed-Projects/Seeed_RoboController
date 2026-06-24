@@ -215,7 +215,8 @@ class CalibrationWizard(QDialog):
         # 初始化行
         for i, servo_id in enumerate(range(1, 7)):
             joint_name = ID_TO_JOINT.get(servo_id, f"joint_{servo_id}")
-            display_name = JOINT_NAME_MAP.get(joint_name, joint_name)
+            # 校准向导界面使用纯中文名称，去掉英文对照
+            display_name = JOINT_NAME_MAP.get(joint_name, joint_name).split(" / ")[0]
 
             self.joints_table.setItem(i, 0, self._create_item(str(servo_id), align=Qt.AlignCenter))
             self.joints_table.setItem(i, 1, self._create_item("--", align=Qt.AlignCenter))
@@ -297,13 +298,6 @@ class CalibrationWizard(QDialog):
         self.record_range_layout.addWidget(self.start_range_btn)
         self.record_range_layout.addWidget(self.stop_range_btn)
         control_layout.addLayout(self.record_range_layout)
-
-        # 跳过范围按钮（用于 wrist_roll）
-        self.skip_range_btn = QPushButton("⏭ 跳过范围记录（连续旋转关节）")
-        self.skip_range_btn.setStyleSheet(self._button_style("#6c757d"))
-        self.skip_range_btn.setMinimumHeight(35)
-        self.skip_range_btn.clicked.connect(self.skip_range)
-        control_layout.addWidget(self.skip_range_btn)
 
         # 导航按钮
         nav_layout = QHBoxLayout()
@@ -657,11 +651,11 @@ class CalibrationWizard(QDialog):
         self.update_instruction()
 
     def update_instruction(self):
-        """更新操作说明"""
+        """更新操作说明和按钮可用状态"""
         joint = self.joints[self.current_joint_index]
         name = joint["display_name"]
 
-        # 记录范围进行中时，保持记录中的按钮状态，不要被 joint status 覆盖
+        # 记录范围进行中：除【停止记录范围】外，其他操作按钮全部禁用
         if self.is_recording:
             self.instruction_label.setText(
                 f"⏺️ 正在记录 {name} 的运动范围...\n"
@@ -671,7 +665,9 @@ class CalibrationWizard(QDialog):
             self.record_home_btn.setEnabled(False)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(True)
-            self.skip_range_btn.setEnabled(False)
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            self.save_btn.setEnabled(False)
             self.current_joint_label.setText(f"当前关节: ID{joint['id']} - {name}")
             return
 
@@ -684,43 +680,45 @@ class CalibrationWizard(QDialog):
             self.record_home_btn.setEnabled(False)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(False)
-            self.skip_range_btn.setEnabled(False)
-            return
-
-        if joint["name"] in CONTINUOUS_JOINTS:
+        elif joint["name"] in CONTINUOUS_JOINTS:
             self.instruction_label.setText(
                 f"当前关节: {name}\n"
                 f"这是连续旋转关节（wrist_roll），只需记录中位值，\n"
                 f"范围固定为 [0, 4095]。"
             )
+            self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(False)
-            self.skip_range_btn.setEnabled(True)
         elif joint["status"] == "pending":
             self.instruction_label.setText(
                 f"步骤 1/2：请将 {name} 移动到运动范围的中间位置，\n"
                 f"然后点击【记录中位值】。"
             )
+            self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(False)
-            self.skip_range_btn.setEnabled(False)
         elif joint["status"] == "homing_done":
             self.instruction_label.setText(
                 f"步骤 2/2：{name} 中位已记录为 {joint['homing_offset']}。\n"
                 f"现在请缓慢移动该关节经过整个运动范围，\n"
                 f"点击【开始记录范围】，移动完成后点击【停止记录范围】。"
             )
+            self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(True)
             self.stop_range_btn.setEnabled(False)
-            self.skip_range_btn.setEnabled(False)
         elif joint["status"] == "done":
             self.instruction_label.setText(
                 f"✅ {name} 校准完成！\n"
                 f"中位: {joint['homing_offset']} | 范围: [{joint['range_min']}, {joint['range_max']}]"
             )
+            self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(True)
             self.stop_range_btn.setEnabled(False)
-            self.skip_range_btn.setEnabled(False)
+
+        # 导航按钮：首尾关节禁用对应方向
+        self.prev_btn.setEnabled(self.current_joint_index > 0)
+        self.next_btn.setEnabled(self.current_joint_index < len(self.joints) - 1)
+        self.save_btn.setEnabled(True)
 
         # 更新当前关节标签
         self.current_joint_label.setText(
@@ -850,6 +848,9 @@ class CalibrationWizard(QDialog):
         # 启动高频读取定时器，确保能捕捉到运动范围的极值
         self.range_recording_timer.start(30)  # 约 33Hz
 
+        # 立即刷新按钮状态，禁用其他操作
+        self.update_instruction()
+
     def stop_range_recording(self):
         """停止记录范围"""
         if not self.is_recording:
@@ -873,15 +874,8 @@ class CalibrationWizard(QDialog):
         # 自动下一个
         self.next_joint()
 
-    def skip_range(self):
-        """跳过范围记录（用于连续旋转关节）"""
-        joint = self.joints[self.current_joint_index]
-        if joint["name"] in CONTINUOUS_JOINTS:
-            joint["range_min"] = 0
-            joint["range_max"] = 4095
-            joint["status"] = "done"
-            self.status_label.setText(f"{joint['display_name']} 已跳过（连续旋转）")
-            self.next_joint()
+        # 立即刷新按钮状态，恢复其他操作
+        self.update_instruction()
 
     def next_joint(self):
         """切换到下一个关节"""
