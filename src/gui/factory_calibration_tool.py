@@ -2765,7 +2765,7 @@ class EZToolUI(QMainWindow):
 
         # 打开校准向导对话框（阻塞式）
         try:
-            wizard = CalibrationWizard(target_port, arm_type, self)
+            wizard = CalibrationWizard(target_port, arm_type, parent=self)
             wizard.exec()
 
             # 校准完成后刷新文件列表
