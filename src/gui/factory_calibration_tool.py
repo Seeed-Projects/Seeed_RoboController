@@ -31,6 +31,12 @@ from PySide6.QtGui import QFont, QPalette, QColor, QTextCursor
 from scservo_sdk.port_handler import PortHandler
 from scservo_sdk.sms_sts import sms_sts
 from scservo_sdk.scservo_def import COMM_SUCCESS
+from scservo_sdk.protocol_packet_handler import (
+    ERRBIT_VOLTAGE,
+    ERRBIT_OVERHEAT,
+    ERRBIT_OVERELE,
+    ERRBIT_OVERLOAD,
+)
 
 # 引入主题工具，强制浅色主题以避免 Windows 深色模式下文字看不见
 try:
@@ -56,6 +62,56 @@ try:
 except ImportError:
     CALIBRATION_MANAGER_AVAILABLE = False
     print("Warning: calibration_manager not found, calibration file view disabled")
+
+# 引入电压/温度阈值判断
+try:
+    from src.tools.servo_middle_calibration import (
+        get_voltage_range,
+        SAFE_TEMPERATURE_MAX,
+    )
+except ImportError:
+    # 备用定义，避免导入失败时 UI 无法启动
+    def get_voltage_range(voltage):
+        if voltage is None:
+            return (4.5, 13.5)
+        return (4.5, 5.5) if voltage < 7.0 else (10.5, 13.5)
+    SAFE_TEMPERATURE_MAX = 60.0
+
+
+# 飞特舵机型号映射表（model number -> 型号名称）
+# 注：部分型号号为 Seeed / SO-ARM100 定制版本，与飞特官方型号对应
+SERVO_MODEL_NAME_MAP = {
+    777: "STS3215",
+    521: "STS3032",
+    3215: "STS3215",
+    3250: "STS3250",
+    3032: "STS3032",
+    3046: "STS3046",
+    20: "STS20",
+    15: "SCS15",
+    25: "SCS25",
+    45: "SCS45",
+    115: "SCS115",
+    215: "SCS215",
+    2332: "SCS2332",
+    40: "SCS40",
+    9: "SCS009",
+    6560: "SCS6560",
+    30: "SM30",
+    60: "SM60",
+    150: "SM150",
+    260: "SM260",
+}
+
+
+def get_servo_model_name(model_number):
+    """根据型号编号获取舵机型号名称，未知则返回原始编号字符串"""
+    if model_number is None:
+        return "--"
+    name = SERVO_MODEL_NAME_MAP.get(model_number)
+    if name:
+        return f"{name} (#{model_number})"
+    return f"#{model_number}"
 
 
 class RemoteControlWorker(QObject):
@@ -223,7 +279,10 @@ class ServoWorker(QObject):
     status_updated = Signal(list, bool, str)  # 舵机列表, 连接状态, 端口标识
     id_changed = Signal(int, int, bool, str, str)  # old_id, new_id, success, message, 端口标识
     log_message = Signal(str, str)  # 日志消息, 端口标识
-    positions_updated = Signal(dict)  # {servo_id: position} 当前位置更新
+    positions_updated = Signal(object)  # {servo_id: position} 当前位置更新（object 类型避免 PySide6 dict 转换问题）
+    servo_info_updated = Signal(object)  # {servo_id: info_dict} 完整状态更新
+    register_read_result = Signal(int, int, int, int, str, str)  # servo_id, address, length, value, result, port_id
+    system_command_result = Signal(str, bool, str, str)  # command_type, success, message, port_id
 
     def __init__(self, port_name: str, port_id: str):
         super().__init__()
@@ -242,6 +301,11 @@ class ServoWorker(QObject):
         self.id_change_queue = Queue()
         self.id_change_thread = None
         self.id_change_running = False
+
+        # 系统命令队列（寄存器读写、波特率修改、恢复出厂设置）
+        self.system_command_queue = Queue()
+        self.system_command_thread = None
+        self.system_command_running = False
 
         # 单舵机控制队列（力矩、位置）
         self.torque_queue = Queue()
@@ -455,6 +519,223 @@ class ServoWorker(QObject):
             self.log_message.emit(f"❌ {error_msg}", self.port_id)
             return False, error_msg
 
+    # ------------------------------------------------------------------
+    # 系统命令队列：寄存器读写、波特率修改、恢复出厂设置
+    # ------------------------------------------------------------------
+    def queue_system_command(self, command: dict):
+        """将系统命令加入队列"""
+        print(f"[DEBUG] {self.port_id}: 系统命令入队: {command}")
+        self.system_command_queue.put(command)
+        self.log_message.emit(f"📝 {command.get('desc', '系统命令')} 已排队", self.port_id)
+        if not self.system_command_running:
+            self.start_system_command_processor()
+
+    def start_system_command_processor(self):
+        """启动系统命令处理线程"""
+        if not self.system_command_running:
+            self.system_command_running = True
+            self.system_command_thread = threading.Thread(target=self.process_system_commands, daemon=True)
+            self.system_command_thread.start()
+            print(f"[DEBUG] {self.port_id}: 系统命令处理线程已启动")
+
+    def process_system_commands(self):
+        """处理系统命令队列"""
+        print(f"[DEBUG] {self.port_id}: 开始处理系统命令队列")
+        while self.system_command_running or not self.system_command_queue.empty():
+            try:
+                if not self.system_command_queue.empty():
+                    command = self.system_command_queue.get(timeout=1)
+                    cmd_type = command.get("type")
+
+                    # 暂停扫描，避免总线冲突
+                    self.pause_scanning = True
+                    self.log_message.emit(f"⏸️ 暂停扫描，执行: {command.get('desc', cmd_type)}", self.port_id)
+                    time.sleep(0.3)
+
+                    success = False
+                    message = "未知命令"
+                    extra = None
+
+                    try:
+                        if cmd_type == "register_read":
+                            success, message, extra = self.execute_register_read(
+                                command["servo_id"], command["address"], command["length"]
+                            )
+                        elif cmd_type == "register_write":
+                            success, message = self.execute_register_write(
+                                command["servo_id"], command["address"], command["length"], command["value"]
+                            )
+                        elif cmd_type == "baud_rate_change":
+                            success, message = self.execute_baud_rate_change(
+                                command["servo_id"], command["baud_rate"]
+                            )
+                        elif cmd_type == "factory_reset":
+                            success, message = self.execute_factory_reset(command["servo_id"])
+                    except Exception as e:
+                        success = False
+                        message = f"执行异常: {e}"
+                        print(f"[DEBUG] {self.port_id}: 系统命令执行异常: {e}")
+
+                    # 恢复扫描
+                    self.pause_scanning = False
+                    self.log_message.emit(f"▶️ 恢复扫描", self.port_id)
+
+                    # 发送结果
+                    if cmd_type == "register_read" and extra is not None:
+                        self.register_read_result.emit(
+                            command["servo_id"], command["address"], command["length"],
+                            extra, message, self.port_id
+                        )
+                    else:
+                        self.system_command_result.emit(cmd_type, success, message, self.port_id)
+
+                else:
+                    time.sleep(0.1)
+
+            except Exception as e:
+                print(f"[DEBUG] {self.port_id}: 系统命令处理异常: {e}")
+                self.log_message.emit(f"❌ 系统命令处理异常: {e}", self.port_id)
+                self.pause_scanning = False
+
+        print(f"[DEBUG] {self.port_id}: 系统命令处理线程结束")
+        self.system_command_running = False
+        self.pause_scanning = False
+
+    def execute_register_read(self, servo_id: int, address: int, length: int) -> (bool, str, int):
+        """执行寄存器读取"""
+        if not self.is_connected:
+            return False, "未连接舵机控制器", None
+
+        self.log_message.emit(f"🔍 读取 ID{servo_id} 寄存器 0x{address:02X} ({length}字节)", self.port_id)
+        try:
+            if length == 1:
+                value, result, error = self.servo_handler.read1ByteTxRx(servo_id, address)
+            elif length == 2:
+                value, result, error = self.servo_handler.read2ByteTxRx(servo_id, address)
+            elif length == 4:
+                value, result, error = self.servo_handler.read4ByteTxRx(servo_id, address)
+            else:
+                return False, "不支持的长度（仅支持1/2/4字节）", None
+
+            if result == COMM_SUCCESS:
+                self.log_message.emit(f"✅ ID{servo_id} 寄存器 0x{address:02X} = {value} (0x{value:X})", self.port_id)
+                return True, "读取成功", value
+            else:
+                return False, f"读取失败: result={result}, error={error}", None
+        except Exception as e:
+            return False, f"读取异常: {e}", None
+
+    def execute_register_write(self, servo_id: int, address: int, length: int, value: int) -> (bool, str):
+        """执行寄存器写入"""
+        if not self.is_connected:
+            return False, "未连接舵机控制器"
+
+        self.log_message.emit(f"✏️ 写入 ID{servo_id} 寄存器 0x{address:02X} = {value} ({length}字节)", self.port_id)
+        try:
+            if length == 1:
+                result, error = self.servo_handler.write1ByteTxRx(servo_id, address, value)
+            elif length == 2:
+                result, error = self.servo_handler.write2ByteTxRx(servo_id, address, value)
+            elif length == 4:
+                result, error = self.servo_handler.write4ByteTxRx(servo_id, address, value)
+            else:
+                return False, "不支持的长度（仅支持1/2/4字节）"
+
+            if result == COMM_SUCCESS:
+                self.log_message.emit(f"✅ ID{servo_id} 寄存器 0x{address:02X} 写入成功", self.port_id)
+                return True, "写入成功"
+            else:
+                return False, f"写入失败: result={result}, error={error}"
+        except Exception as e:
+            return False, f"写入异常: {e}"
+
+    def execute_baud_rate_change(self, servo_id: int, new_baud_rate: int) -> (bool, str):
+        """执行波特率修改"""
+        if not self.is_connected:
+            return False, "未连接舵机控制器"
+
+        # 波特率值 -> 寄存器值映射
+        baud_to_reg = {
+            1000000: 0,
+            500000: 1,
+            250000: 2,
+            128000: 3,
+            115200: 4,
+            76800: 5,
+            57600: 6,
+            38400: 7,
+        }
+        reg_to_baud = {v: k for k, v in baud_to_reg.items()}
+
+        if new_baud_rate not in baud_to_reg:
+            return False, f"不支持的波特率: {new_baud_rate}"
+
+        reg_value = baud_to_reg[new_baud_rate]
+        old_baud_rate = self.baud_rate
+
+        self.log_message.emit(
+            f"🔧 修改 ID{servo_id} 波特率: {old_baud_rate} -> {new_baud_rate}", self.port_id
+        )
+
+        try:
+            # 解锁 EEPROM
+            result, error = self.servo_handler.unLockEprom(servo_id)
+            if result != COMM_SUCCESS:
+                return False, f"EEPROM解锁失败: {error}"
+
+            # 写入新波特率（地址 6）
+            result, error = self.servo_handler.write1ByteTxRx(servo_id, 6, reg_value)
+            if result != COMM_SUCCESS:
+                self.servo_handler.LockEprom(servo_id)
+                return False, f"波特率写入失败: {error}"
+
+            # 锁定 EEPROM
+            self.servo_handler.LockEprom(servo_id)
+            time.sleep(0.2)
+
+            # 尝试切换到新波特率
+            self.log_message.emit(f"🔄 串口切换到 {new_baud_rate} bps...", self.port_id)
+            self.port_handler.setBaudRate(new_baud_rate)
+            self.baud_rate = new_baud_rate
+            time.sleep(0.3)
+
+            # 验证通信
+            if self.ping_servo(servo_id):
+                self.log_message.emit(f"✅ 波特率修改成功，当前 {new_baud_rate} bps", self.port_id)
+                return True, f"波特率已修改为 {new_baud_rate} bps"
+            else:
+                # 切换失败，尝试恢复旧波特率
+                self.log_message.emit(f"⚠️ 新波特率验证失败，尝试恢复 {old_baud_rate} bps", self.port_id)
+                self.port_handler.setBaudRate(old_baud_rate)
+                self.baud_rate = old_baud_rate
+                time.sleep(0.3)
+                if self.ping_servo(servo_id):
+                    return False, f"新波特率验证失败，已恢复 {old_baud_rate} bps"
+                else:
+                    return False, f"严重：波特率修改失败且旧波特率也丢失了，请重新连接"
+
+        except Exception as e:
+            return False, f"波特率修改异常: {e}"
+
+    def execute_factory_reset(self, servo_id: int) -> (bool, str):
+        """执行恢复出厂设置"""
+        if not self.is_connected:
+            return False, "未连接舵机控制器"
+
+        self.log_message.emit(f"🔄 恢复 ID{servo_id} 出厂设置...", self.port_id)
+        try:
+            result, error = self.servo_handler.reSet(servo_id)
+            if result == COMM_SUCCESS:
+                self.log_message.emit(
+                    f"✅ ID{servo_id} 已恢复出厂设置（ID 将变回 1，波特率变回 1000000）",
+                    self.port_id
+                )
+                return True, "恢复出厂设置成功，请重新扫描（舵机ID已变为1）"
+            else:
+                return False, f"恢复出厂设置失败: result={result}, error={error}"
+        except Exception as e:
+            return False, f"恢复出厂设置异常: {e}"
+
     def set_servo_torque(self, servo_id: int, enable: bool):
         """设置单个舵机力矩（加入队列，由扫描线程串行执行）"""
         self.torque_queue.put((servo_id, enable))
@@ -510,19 +791,86 @@ class ServoWorker(QObject):
             except Exception as e:
                 self.log_message.emit(f"❌ 位置命令异常: {e}", self.port_id)
 
-    def _read_positions(self) -> dict:
-        """读取当前在线舵机的位置"""
-        positions = {}
+    def _read_servo_info(self) -> dict:
+        """读取当前在线舵机的完整状态信息"""
+        info = {}
         if self.servo_handler is None or not self.is_connected:
-            return positions
+            return info
 
         for servo_id in self.current_servos:
+            servo_info = {
+                "id": servo_id,
+                "position": None,
+                "speed": None,
+                "load": None,
+                "voltage": None,
+                "temperature": None,
+                "current": None,
+                "moving": None,
+                "model": None,
+                "status": None,
+                "errors": {},
+            }
             try:
-                pos, result, error = self.servo_handler.ReadPos(servo_id)
+                pos, result, _ = self.servo_handler.ReadPos(servo_id)
                 if result == COMM_SUCCESS:
-                    positions[servo_id] = pos
+                    servo_info["position"] = pos
+
+                speed, result, _ = self.servo_handler.ReadSpeed(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["speed"] = speed
+
+                load, result, _ = self.servo_handler.ReadLoad(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["load"] = load
+
+                voltage, result, _ = self.servo_handler.ReadVoltage(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["voltage"] = voltage / 10.0
+
+                temperature, result, _ = self.servo_handler.ReadTemperature(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["temperature"] = temperature
+
+                current, result, _ = self.servo_handler.ReadCurrent(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["current"] = current
+
+                moving, result, _ = self.servo_handler.ReadMoving(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["moving"] = bool(moving)
+
+                model, result, _ = self.servo_handler.ReadModelNumber(servo_id)
+                if result == COMM_SUCCESS:
+                    servo_info["model"] = model
+
+                # 读取状态寄存器（地址 65）获取保护标志
+                status, result, _ = self.servo_handler.read1ByteTxRx(servo_id, 65)
+                if result == COMM_SUCCESS:
+                    servo_info["status"] = status
+                    servo_info["errors"] = self._parse_servo_status(status)
+
+                info[servo_id] = servo_info
             except Exception:
                 pass
+        return info
+
+    def _parse_servo_status(self, status: int) -> dict:
+        """解析舵机状态寄存器中的保护标志"""
+        return {
+            "overload": bool(status & ERRBIT_OVERLOAD),
+            "over_current": bool(status & ERRBIT_OVERELE),
+            "over_heat": bool(status & ERRBIT_OVERHEAT),
+            "over_voltage": bool(status & ERRBIT_VOLTAGE),
+        }
+
+    def _read_positions(self) -> dict:
+        """读取当前在线舵机的位置（兼容旧信号）"""
+        positions = {}
+        info = self._read_servo_info()
+        for servo_id, servo_info in info.items():
+            if servo_info["position"] is not None:
+                positions[servo_id] = servo_info["position"]
         return positions
 
     def run_scanner(self):
@@ -611,10 +959,19 @@ class ServoWorker(QObject):
                         print(f"[DEBUG] {self.port_id}: Emitting status_updated: servos={new_servos}, connected={self.is_connected}")
                         self.status_updated.emit(self.current_servos, self.is_connected, self.port_id)
 
-                # 读取并发送当前位置
-                positions = self._read_positions()
-                if positions:
-                    self.positions_updated.emit(positions)
+                # 读取并发送当前状态（包含位置、电压、温度等）
+                servo_info = self._read_servo_info()
+                if servo_info:
+                    # 兼容旧信号
+                    positions = {
+                        sid: sinfo["position"]
+                        for sid, sinfo in servo_info.items()
+                        if sinfo["position"] is not None
+                    }
+                    if positions:
+                        self.positions_updated.emit(positions)
+                    # 新信号：完整状态
+                    self.servo_info_updated.emit(servo_info)
 
                 # 每30次扫描显示一次状态（减少日志频率）
                 if scan_count % 30 == 0:
@@ -639,11 +996,16 @@ class ServoWorker(QObject):
         """停止工作线程"""
         self.running = False
         self.id_change_running = False
+        self.system_command_running = False
         self.disconnect_servo()
 
         # 等待ID修改线程结束
         if self.id_change_thread and self.id_change_thread.is_alive():
             self.id_change_thread.join(timeout=2)
+
+        # 等待系统命令线程结束
+        if self.system_command_thread and self.system_command_thread.is_alive():
+            self.system_command_thread.join(timeout=2)
 
 
 class ServoPanel(QWidget):
@@ -915,13 +1277,27 @@ class ServoPanel(QWidget):
         global_btn_layout.addStretch()
         control_layout.addLayout(global_btn_layout)
 
-        # 每个舵机一行：ID | 当前位置 | 滑动条 | 目标位置 | 力矩开关
+        # 每个舵机两行：
+        # 第一行：ID | 当前位置 | 电压 | 温度 | 滑动条 | 目标位置 | 力矩开关
+        # 第二行：速度 | 负载 | 电流 | 运行状态 | 型号
         self.servo_sliders = {}
         self.servo_pos_labels = {}
+        self.servo_voltage_labels = {}
+        self.servo_temp_labels = {}
         self.servo_target_labels = {}
         self.servo_torque_btns = {}
+        self.servo_speed_labels = {}
+        self.servo_load_labels = {}
+        self.servo_current_labels = {}
+        self.servo_moving_labels = {}
+        self.servo_model_labels = {}
+        self.servo_status_labels = {}
 
         for servo_id in range(1, 7):
+            servo_layout = QVBoxLayout()
+            servo_layout.setSpacing(2)
+            servo_layout.setContentsMargins(0, 0, 0, 0)
+
             row_layout = QHBoxLayout()
             row_layout.setSpacing(8)
 
@@ -933,6 +1309,16 @@ class ServoPanel(QWidget):
             pos_label.setStyleSheet("font-size: 11px; min-width: 65px;")
             self.servo_pos_labels[servo_id] = pos_label
             row_layout.addWidget(pos_label)
+
+            voltage_label = QLabel("V: --")
+            voltage_label.setStyleSheet("font-size: 11px; min-width: 55px; color: #17a2b8;")
+            self.servo_voltage_labels[servo_id] = voltage_label
+            row_layout.addWidget(voltage_label)
+
+            temp_label = QLabel("T: --")
+            temp_label.setStyleSheet("font-size: 11px; min-width: 55px; color: #dc3545;")
+            self.servo_temp_labels[servo_id] = temp_label
+            row_layout.addWidget(temp_label)
 
             slider = QSlider(Qt.Horizontal)
             slider.setRange(0, 4095)
@@ -995,7 +1381,47 @@ class ServoPanel(QWidget):
             self.servo_torque_btns[servo_id] = torque_btn
             row_layout.addWidget(torque_btn)
 
-            control_layout.addLayout(row_layout)
+            servo_layout.addLayout(row_layout)
+
+            # 第二行：扩展状态信息
+            info_layout = QHBoxLayout()
+            info_layout.setSpacing(8)
+            info_layout.setContentsMargins(43, 0, 0, 4)  # 左侧缩进与第一行 ID 列对齐
+
+            speed_label = QLabel("Spd: --")
+            speed_label.setStyleSheet("font-size: 10px; min-width: 75px; color: #6f42c1;")
+            self.servo_speed_labels[servo_id] = speed_label
+            info_layout.addWidget(speed_label)
+
+            load_label = QLabel("Load: --")
+            load_label.setStyleSheet("font-size: 10px; min-width: 75px; color: #fd7e14;")
+            self.servo_load_labels[servo_id] = load_label
+            info_layout.addWidget(load_label)
+
+            current_label = QLabel("Cur: --")
+            current_label.setStyleSheet("font-size: 10px; min-width: 70px; color: #20c997;")
+            self.servo_current_labels[servo_id] = current_label
+            info_layout.addWidget(current_label)
+
+            moving_label = QLabel("Mov: --")
+            moving_label.setStyleSheet("font-size: 10px; min-width: 70px; color: #0dcaf0;")
+            self.servo_moving_labels[servo_id] = moving_label
+            info_layout.addWidget(moving_label)
+
+            model_label = QLabel("Model: --")
+            model_label.setStyleSheet("font-size: 10px; min-width: 140px; color: #6c757d;")
+            self.servo_model_labels[servo_id] = model_label
+            info_layout.addWidget(model_label)
+
+            status_label = QLabel("Status: --")
+            status_label.setStyleSheet("font-size: 10px; min-width: 100px; color: #28a745; font-weight: bold;")
+            self.servo_status_labels[servo_id] = status_label
+            info_layout.addWidget(status_label)
+
+            info_layout.addStretch()
+            servo_layout.addLayout(info_layout)
+
+            control_layout.addLayout(servo_layout)
 
         # 提示文字
         tip_label = QLabel(
@@ -1041,6 +1467,7 @@ class ServoPanel(QWidget):
         self.worker.id_changed.connect(self.on_id_changed)
         self.worker.log_message.connect(self.add_log)
         self.worker.positions_updated.connect(self.update_positions)
+        self.worker.servo_info_updated.connect(self.update_servo_info)
 
         # 添加初始连接日志
         self.add_log("🔄 信号连接已建立", self.port_id)
@@ -1139,17 +1566,168 @@ class ServoPanel(QWidget):
             if not online:
                 # 离线时重置显示
                 self.servo_pos_labels[servo_id].setText("Pos: --")
+                self.servo_voltage_labels[servo_id].setText("V: --")
+                self.servo_temp_labels[servo_id].setText("T: --")
+                self.servo_speed_labels[servo_id].setText("Spd: --")
+                self.servo_load_labels[servo_id].setText("Load: --")
+                self.servo_current_labels[servo_id].setText("Cur: --")
+                self.servo_moving_labels[servo_id].setText("Mov: --")
+                self.servo_model_labels[servo_id].setText("Model: --")
+                self.servo_status_labels[servo_id].setText("Status: --")
+                self.servo_status_labels[servo_id].setStyleSheet(
+                    "font-size: 10px; min-width: 100px; color: #6c757d; font-weight: bold;"
+                )
+                self.servo_voltage_labels[servo_id].setToolTip("")
+                self.servo_temp_labels[servo_id].setToolTip("")
                 torque_btn.setChecked(False)
                 torque_btn.setText("⚡ 力矩")
 
     def update_positions(self, positions: dict):
-        """更新各舵机当前位置显示"""
+        """更新各舵机当前位置显示（兼容旧信号）"""
         if not positions:
             return
 
         for servo_id, pos in positions.items():
             if servo_id in self.servo_pos_labels:
                 self.servo_pos_labels[servo_id].setText(f"Pos: {pos}")
+
+    def update_servo_info(self, info: dict):
+        """更新各舵机完整状态显示（电压、温度、速度、负载、电流、运行状态、型号等）"""
+        if not info:
+            return
+
+        for servo_id, servo_info in info.items():
+            if servo_id not in self.servo_pos_labels:
+                continue
+
+            pos = servo_info.get("position")
+            voltage = servo_info.get("voltage")
+            temperature = servo_info.get("temperature")
+            speed = servo_info.get("speed")
+            load = servo_info.get("load")
+            current = servo_info.get("current")
+            moving = servo_info.get("moving")
+            model = servo_info.get("model")
+
+            if pos is not None:
+                self.servo_pos_labels[servo_id].setText(f"Pos: {pos}")
+            if voltage is not None:
+                self.servo_voltage_labels[servo_id].setText(f"V: {voltage:.1f}V")
+            if temperature is not None:
+                self.servo_temp_labels[servo_id].setText(f"T: {temperature}°C")
+            if speed is not None:
+                self.servo_speed_labels[servo_id].setText(f"Spd: {speed}")
+            if load is not None:
+                self.servo_load_labels[servo_id].setText(f"Load: {load}")
+            if current is not None:
+                # Feetech STS 系列舵机电流转换：1 单位 ≈ 6.5 mA
+                current_ma = current * 6.5
+                self.servo_current_labels[servo_id].setText(f"Cur: {current_ma:.1f}mA")
+            if moving is not None:
+                self.servo_moving_labels[servo_id].setText(f"Mov: {'Yes' if moving else 'No'}")
+            if model is not None:
+                model_name = get_servo_model_name(model)
+                self.servo_model_labels[servo_id].setText(f"Model: {model_name}")
+
+            # 更新保护状态显示
+            errors = servo_info.get("errors", {})
+            if errors:
+                active_errors = []
+                if errors.get("overload"):
+                    active_errors.append("过载")
+                if errors.get("over_current"):
+                    active_errors.append("过流")
+                if errors.get("over_voltage"):
+                    active_errors.append("过压")
+                if errors.get("over_heat"):
+                    active_errors.append("过热")
+
+                if active_errors:
+                    status_text = "Status: " + ",".join(active_errors)
+                    self.servo_status_labels[servo_id].setText(status_text)
+                    self.servo_status_labels[servo_id].setStyleSheet(
+                        "font-size: 10px; min-width: 100px; color: #dc3545; font-weight: bold;"
+                    )
+                else:
+                    self.servo_status_labels[servo_id].setText("Status: OK")
+                    self.servo_status_labels[servo_id].setStyleSheet(
+                        "font-size: 10px; min-width: 100px; color: #28a745; font-weight: bold;"
+                    )
+
+            # Tooltip 显示更详细信息
+            tooltip_lines = [f"ID: {servo_id}"]
+            if model is not None:
+                tooltip_lines.append(f"型号: {get_servo_model_name(model)}")
+            if speed is not None:
+                tooltip_lines.append(f"速度: {speed}")
+            if load is not None:
+                tooltip_lines.append(f"负载: {load}")
+            if current is not None:
+                tooltip_lines.append(f"电流: {current_ma:.1f} mA")
+            if moving is not None:
+                tooltip_lines.append(f"运行中: {'是' if moving else '否'}")
+            if errors:
+                tooltip_lines.append("")
+                tooltip_lines.append("保护状态:")
+                tooltip_lines.append(f"  过载: {'是' if errors.get('overload') else '否'}")
+                tooltip_lines.append(f"  过流: {'是' if errors.get('over_current') else '否'}")
+                tooltip_lines.append(f"  过压: {'是' if errors.get('over_voltage') else '否'}")
+                tooltip_lines.append(f"  过热: {'是' if errors.get('over_heat') else '否'}")
+                tooltip_lines.append("")
+                tooltip_lines.append("保护说明:")
+                tooltip_lines.append("  过载: 堵转>80%持续2s后保护")
+                tooltip_lines.append("  过流: 电流>2A持续2s后保护")
+                tooltip_lines.append("  过压: 电压>8V或<4V保护")
+                tooltip_lines.append("  过热: 温度>70℃关闭扭矩")
+            tooltip = "\n".join(tooltip_lines)
+            self.servo_voltage_labels[servo_id].setToolTip(tooltip)
+            self.servo_temp_labels[servo_id].setToolTip(tooltip)
+            self.servo_status_labels[servo_id].setToolTip(tooltip)
+
+        # 健康检查
+        self.check_servo_health_ui(info)
+
+    def check_servo_health_ui(self, info: dict):
+        """检查舵机健康状态并在日志/状态栏提示"""
+        warnings = []
+        for servo_id, servo_info in info.items():
+            voltage = servo_info.get("voltage")
+            temperature = servo_info.get("temperature")
+            errors = servo_info.get("errors", {})
+
+            if voltage is not None:
+                v_min, v_max = get_voltage_range(voltage)
+                if voltage < v_min or voltage > v_max:
+                    warnings.append(
+                        f"ID{servo_id} 电压异常: {voltage:.1f}V (安全范围 {v_min:.1f}V~{v_max:.1f}V)"
+                    )
+            if temperature is not None and temperature > SAFE_TEMPERATURE_MAX:
+                warnings.append(
+                    f"ID{servo_id} 温度过高: {temperature}°C (建议 < {SAFE_TEMPERATURE_MAX:.0f}°C)"
+                )
+
+            # 保护状态警告
+            if errors.get("overload"):
+                warnings.append(f"ID{servo_id} 过载保护: 堵转>80%持续2s，需重新发位置指令清除")
+            if errors.get("over_current"):
+                warnings.append(f"ID{servo_id} 过流保护: 电流>2A持续2s，需重新发位置指令清除")
+            if errors.get("over_voltage"):
+                warnings.append(f"ID{servo_id} 过压保护: 电压>8V或<4V")
+            if errors.get("over_heat"):
+                warnings.append(f"ID{servo_id} 过热保护: 温度>70℃，已关闭扭矩输出")
+
+        if warnings:
+            # 避免过于频繁提示：同一端口 5 秒内最多提示一次
+            now = time.time()
+            last_warn = getattr(self, "_last_health_warning", 0)
+            if now - last_warn > 5:
+                self._last_health_warning = now
+                warning_text = " | ".join(warnings)
+                self.add_log(f"🚨 健康警告: {warning_text}", self.port_id)
+                # 如果有父窗口且状态栏可用，也显示在状态栏
+                main_window = self.window()
+                if main_window and hasattr(main_window, "status_bar"):
+                    main_window.status_bar.showMessage(f"🚨 {self.port_id}端口: {warning_text}", 5000)
 
     def on_slider_value_changed(self, servo_id: int, value: int):
         """滑动条数值变化时更新目标位置显示"""
@@ -1372,6 +1950,422 @@ class ServoPanel(QWidget):
         """停止工作线程"""
         if self.worker:
             self.worker.stop()
+
+
+class AdvancedToolsPanel(QWidget):
+    """高级工具面板：寄存器读写、波特率修改、恢复出厂设置"""
+
+    def __init__(self, servo_panel: ServoPanel):
+        super().__init__()
+        self.servo_panel = servo_panel
+        self.worker = servo_panel.worker
+        self.init_ui()
+        self.init_connections()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # 设置面板样式，确保 QGroupBox 标题完整显示
+        self.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-bottom: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 10px;
+                padding: 0 8px 0 8px;
+                color: #495057;
+            }
+            QLabel { color: #495057; }
+            QPushButton {
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:disabled { background-color: #6c757d; }
+        """)
+
+        # 标题
+        title = QLabel(f"🔧 高级工具 - {self.servo_panel.port_name}")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # 舵机选择
+        servo_group = QGroupBox("🎯 目标舵机")
+        servo_layout = QHBoxLayout()
+        servo_group.setLayout(servo_layout)
+
+        servo_label = QLabel("舵机ID:")
+        servo_label.setStyleSheet("font-size: 12px;")
+        servo_layout.addWidget(servo_label)
+
+        self.servo_id_combo = QComboBox()
+        self.servo_id_combo.setMinimumWidth(80)
+        self.servo_id_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 11px;
+                padding: 3px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+            }
+        """)
+        servo_layout.addWidget(self.servo_id_combo)
+
+        refresh_btn = QPushButton("🔄")
+        refresh_btn.setFixedSize(28, 28)
+        refresh_btn.setToolTip("刷新舵机列表")
+        refresh_btn.clicked.connect(self.refresh_servo_ids)
+        servo_layout.addWidget(refresh_btn)
+
+        servo_layout.addStretch()
+        layout.addWidget(servo_group)
+
+        # 寄存器读取
+        read_group = QGroupBox("📖 寄存器读取")
+        read_layout = QGridLayout()
+        read_group.setLayout(read_layout)
+
+        read_layout.addWidget(QLabel("地址:"), 0, 0)
+        self.read_addr_spin = QSpinBox()
+        self.read_addr_spin.setRange(0, 255)
+        self.read_addr_spin.setDisplayIntegerBase(16)
+        self.read_addr_spin.setPrefix("0x")
+        read_layout.addWidget(self.read_addr_spin, 0, 1)
+
+        read_layout.addWidget(QLabel("长度:"), 0, 2)
+        self.read_len_combo = QComboBox()
+        self.read_len_combo.addItems(["1 字节", "2 字节", "4 字节"])
+        self.read_len_combo.setItemData(0, 1)
+        self.read_len_combo.setItemData(1, 2)
+        self.read_len_combo.setItemData(2, 4)
+        read_layout.addWidget(self.read_len_combo, 0, 3)
+
+        self.read_btn = QPushButton("🔍 读取")
+        self.read_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8; color: white; border: none;
+                padding: 6px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #138496; }
+            QPushButton:disabled { background-color: #6c757d; }
+        """)
+        self.read_btn.clicked.connect(self.on_read_register)
+        read_layout.addWidget(self.read_btn, 1, 0, 1, 2)
+
+        self.read_result_label = QLabel("结果: --")
+        self.read_result_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 12px; color: #495057;")
+        read_layout.addWidget(self.read_result_label, 1, 2, 1, 2)
+
+        layout.addWidget(read_group)
+
+        # 寄存器写入
+        write_group = QGroupBox("✏️ 寄存器写入")
+        write_layout = QGridLayout()
+        write_group.setLayout(write_layout)
+
+        write_layout.addWidget(QLabel("地址:"), 0, 0)
+        self.write_addr_spin = QSpinBox()
+        self.write_addr_spin.setRange(0, 255)
+        self.write_addr_spin.setDisplayIntegerBase(16)
+        self.write_addr_spin.setPrefix("0x")
+        write_layout.addWidget(self.write_addr_spin, 0, 1)
+
+        write_layout.addWidget(QLabel("长度:"), 0, 2)
+        self.write_len_combo = QComboBox()
+        self.write_len_combo.addItems(["1 字节", "2 字节", "4 字节"])
+        self.write_len_combo.setItemData(0, 1)
+        self.write_len_combo.setItemData(1, 2)
+        self.write_len_combo.setItemData(2, 4)
+        write_layout.addWidget(self.write_len_combo, 0, 3)
+
+        write_layout.addWidget(QLabel("数值:"), 1, 0)
+        self.write_value_spin = QSpinBox()
+        self.write_value_spin.setRange(0, 2147483647)
+        self.write_value_spin.setDisplayIntegerBase(10)
+        write_layout.addWidget(self.write_value_spin, 1, 1)
+
+        self.write_btn = QPushButton("✏️ 写入")
+        self.write_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #fd7e14; color: white; border: none;
+                padding: 6px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #e56b0a; }
+            QPushButton:disabled { background-color: #6c757d; }
+        """)
+        self.write_btn.clicked.connect(self.on_write_register)
+        write_layout.addWidget(self.write_btn, 1, 2, 1, 2)
+
+        layout.addWidget(write_group)
+
+        # 波特率修改
+        baud_group = QGroupBox("🔌 波特率修改")
+        baud_layout = QHBoxLayout()
+        baud_group.setLayout(baud_layout)
+
+        baud_layout.addWidget(QLabel("新波特率:"))
+        self.baud_combo = QComboBox()
+        for rate in [1000000, 500000, 250000, 128000, 115200, 76800, 57600, 38400]:
+            self.baud_combo.addItem(str(rate), rate)
+        baud_layout.addWidget(self.baud_combo)
+
+        self.baud_btn = QPushButton("🔧 修改波特率")
+        self.baud_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6f42c1; color: white; border: none;
+                padding: 6px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #5a32a3; }
+            QPushButton:disabled { background-color: #6c757d; }
+        """)
+        self.baud_btn.clicked.connect(self.on_change_baud_rate)
+        baud_layout.addWidget(self.baud_btn)
+        baud_layout.addStretch()
+
+        layout.addWidget(baud_group)
+
+        # 恢复出厂设置
+        reset_group = QGroupBox("🔄 恢复出厂设置")
+        reset_layout = QHBoxLayout()
+        reset_group.setLayout(reset_layout)
+
+        reset_info = QLabel("⚠️ 将舵机恢复为出厂状态（ID 变回 1，波特率变回 1000000）")
+        reset_info.setStyleSheet("color: #856404; font-size: 11px;")
+        reset_info.setWordWrap(True)
+        reset_layout.addWidget(reset_info)
+
+        self.reset_btn = QPushButton("🔄 恢复出厂")
+        self.reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545; color: white; border: none;
+                padding: 6px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #c82333; }
+            QPushButton:disabled { background-color: #6c757d; }
+        """)
+        self.reset_btn.clicked.connect(self.on_factory_reset)
+        reset_layout.addWidget(self.reset_btn)
+
+        layout.addWidget(reset_group)
+
+        # 操作日志
+        log_group = QGroupBox("📋 操作日志")
+        log_layout = QVBoxLayout()
+        log_group.setLayout(log_layout)
+
+        self.adv_log_text = QTextEdit()
+        self.adv_log_text.setReadOnly(True)
+        self.adv_log_text.setMaximumHeight(150)
+        self.adv_log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa; color: #212529;
+                border: 1px solid #ced4da; border-radius: 4px;
+                font-family: 'Consolas', monospace; font-size: 11px;
+            }
+        """)
+        log_layout.addWidget(self.adv_log_text)
+
+        clear_btn = QPushButton("清空")
+        clear_btn.setMaximumWidth(60)
+        clear_btn.clicked.connect(self.adv_log_text.clear)
+        log_layout.addWidget(clear_btn)
+
+        layout.addWidget(log_group)
+        layout.addStretch()
+
+        # 初始状态
+        self.refresh_servo_ids()
+        self.update_button_states()
+
+    def init_connections(self):
+        """初始化信号连接"""
+        if self.worker is None:
+            return
+        self.worker.register_read_result.connect(self.on_register_read_result)
+        self.worker.system_command_result.connect(self.on_system_command_result)
+        self.worker.status_updated.connect(self.on_status_updated)
+
+    def refresh_servo_ids(self):
+        """刷新舵机ID列表"""
+        self.servo_id_combo.clear()
+        servos = []
+        if self.worker:
+            servos = sorted(self.worker.current_servos)
+        if servos:
+            for sid in servos:
+                self.servo_id_combo.addItem(f"ID{sid}", sid)
+        else:
+            self.servo_id_combo.addItem("无舵机", None)
+        self.update_button_states()
+
+    def update_button_states(self):
+        """根据是否有在线舵机更新按钮状态"""
+        has_worker = self.worker is not None and self.worker.is_connected
+        has_servos = has_worker and len(self.worker.current_servos) > 0
+        enabled = has_servos and self.servo_id_combo.currentData() is not None
+
+        self.read_btn.setEnabled(enabled)
+        self.write_btn.setEnabled(enabled)
+        self.baud_btn.setEnabled(enabled)
+        self.reset_btn.setEnabled(enabled)
+
+    def get_selected_servo_id(self):
+        """获取选中的舵机ID"""
+        return self.servo_id_combo.currentData()
+
+    def add_log(self, message):
+        """添加日志"""
+        timestamp = time.strftime("%H:%M:%S")
+        self.adv_log_text.append(f"[{timestamp}] {message}")
+        scrollbar = self.adv_log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def on_read_register(self):
+        """读取寄存器"""
+        servo_id = self.get_selected_servo_id()
+        if servo_id is None or self.worker is None:
+            QMessageBox.warning(self, "警告", "请先选择舵机")
+            return
+
+        address = self.read_addr_spin.value()
+        length = self.read_len_combo.currentData()
+
+        self.read_result_label.setText("结果: 读取中...")
+        self.worker.queue_system_command({
+            "type": "register_read",
+            "servo_id": servo_id,
+            "address": address,
+            "length": length,
+            "desc": f"读取 ID{servo_id} 寄存器 0x{address:02X}",
+        })
+
+    def on_write_register(self):
+        """写入寄存器"""
+        servo_id = self.get_selected_servo_id()
+        if servo_id is None or self.worker is None:
+            QMessageBox.warning(self, "警告", "请先选择舵机")
+            return
+
+        address = self.write_addr_spin.value()
+        length = self.write_len_combo.currentData()
+        value = self.write_value_spin.value()
+
+        reply = QMessageBox.question(
+            self,
+            "确认写入",
+            f"确定要写入 ID{servo_id} 寄存器 0x{address:02X} = {value} ({length}字节) 吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.worker.queue_system_command({
+            "type": "register_write",
+            "servo_id": servo_id,
+            "address": address,
+            "length": length,
+            "value": value,
+            "desc": f"写入 ID{servo_id} 寄存器 0x{address:02X}",
+        })
+
+    def on_change_baud_rate(self):
+        """修改波特率"""
+        servo_id = self.get_selected_servo_id()
+        if servo_id is None or self.worker is None:
+            QMessageBox.warning(self, "警告", "请先选择舵机")
+            return
+
+        new_baud = self.baud_combo.currentData()
+        reply = QMessageBox.warning(
+            self,
+            "警告：修改波特率",
+            f"修改波特率后，串口将立即切换到 {new_baud} bps。\n"
+            f"如果失败，工具会尝试恢复原有波特率。\n\n"
+            f"确定要修改 ID{servo_id} 的波特率吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.worker.queue_system_command({
+            "type": "baud_rate_change",
+            "servo_id": servo_id,
+            "baud_rate": new_baud,
+            "desc": f"修改 ID{servo_id} 波特率为 {new_baud}",
+        })
+
+    def on_factory_reset(self):
+        """恢复出厂设置"""
+        servo_id = self.get_selected_servo_id()
+        if servo_id is None or self.worker is None:
+            QMessageBox.warning(self, "警告", "请先选择舵机")
+            return
+
+        reply = QMessageBox.critical(
+            self,
+            "危险：恢复出厂设置",
+            f"确定要恢复 ID{servo_id} 的出厂设置吗？\n\n"
+            f"这将导致：\n"
+            f"• 舵机 ID 变回 1\n"
+            f"• 波特率变回 1000000\n"
+            f"• 所有参数恢复默认值\n\n"
+            f"此操作不可撤销！",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.worker.queue_system_command({
+            "type": "factory_reset",
+            "servo_id": servo_id,
+            "desc": f"恢复 ID{servo_id} 出厂设置",
+        })
+
+    def on_register_read_result(self, servo_id, address, length, value, result, port_id):
+        """处理寄存器读取结果"""
+        if port_id != self.servo_panel.port_id:
+            return
+        if result == "读取成功":
+            self.read_result_label.setText(
+                f"结果: {value} (0x{value:X})"
+            )
+            self.add_log(f"✅ ID{servo_id} 0x{address:02X} = {value} (0x{value:X})")
+        else:
+            self.read_result_label.setText(f"结果: {result}")
+            self.add_log(f"❌ ID{servo_id} 0x{address:02X} {result}")
+
+    def on_system_command_result(self, cmd_type, success, message, port_id):
+        """处理系统命令结果"""
+        if port_id != self.servo_panel.port_id:
+            return
+        prefix = "✅" if success else "❌"
+        self.add_log(f"{prefix} {message}")
+        if cmd_type in ("baud_rate_change", "factory_reset") and success:
+            # 这些操作后需要重新扫描
+            self.add_log("🔄 请手动点击重新扫描以更新舵机列表")
+
+    def on_status_updated(self, servos, connected, port_id):
+        """舵机列表变化时刷新ID选择"""
+        if port_id != self.servo_panel.port_id:
+            return
+        self.refresh_servo_ids()
 
 
 class EZToolUI(QMainWindow):
@@ -1768,6 +2762,22 @@ class EZToolUI(QMainWindow):
         if CALIBRATION_MANAGER_AVAILABLE:
             calibration_tab = self.create_calibration_tab()
             self.tab_widget.addTab(calibration_tab, "📁 校准管理")
+
+        # === Tab 4: 高级工具 ===
+        advanced_tab = QWidget()
+        advanced_tab_layout = QHBoxLayout(advanced_tab)
+        advanced_tab_layout.setContentsMargins(10, 10, 10, 10)
+        advanced_tab_layout.setSpacing(10)
+
+        advanced_splitter = QSplitter(Qt.Horizontal)
+        self.left_advanced_panel = AdvancedToolsPanel(self.left_panel)
+        self.right_advanced_panel = AdvancedToolsPanel(self.right_panel)
+        advanced_splitter.addWidget(self.left_advanced_panel)
+        advanced_splitter.addWidget(self.right_advanced_panel)
+        advanced_splitter.setSizes([800, 800])
+
+        advanced_tab_layout.addWidget(advanced_splitter)
+        self.tab_widget.addTab(advanced_tab, "🔧 高级工具")
 
         # 设置整体样式
         self.setStyleSheet("""

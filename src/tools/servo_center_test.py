@@ -36,6 +36,18 @@ except ImportError:
     print("   Error: port_utils not found")
     sys.exit(1)
 
+# 引入中位校准工具中的状态读取辅助函数
+try:
+    from src.tools.servo_middle_calibration import (
+        read_all_servo_info,
+        print_servo_info_table,
+        check_servo_health,
+    )
+except ImportError as e:
+    print(f"❌ 错误: 无法导入状态读取函数: {e}")
+    print("   Error: Cannot import status reader functions")
+    sys.exit(1)
+
 # === 配置常量 ===
 BAUD_RATE = 1000000
 MIDDLE_POSITION = 2048  # 正确的中位值
@@ -106,20 +118,12 @@ def quick_center_test(port_name: str, target_position: int = MIDDLE_POSITION) ->
         return False
 
     try:
-        # Step 2: 读取当前位置
-        print("📍 读取当前位置 / Reading current positions...")
-        print("-" * 50)
-        positions_before = {}
-
-        for servo_id in found_servos:
-            position, result, error = servo_handler.ReadPos(servo_id)
-            if result == COMM_SUCCESS:
-                positions_before[servo_id] = position
-                degrees = position_to_degrees(position)
-                print(f"  ID{servo_id}: {position:4d} ({degrees:6.1f}°)")
-            time.sleep(0.05)
-
-        print()
+        # Step 2: 读取当前位置与状态
+        print("📍 读取当前位置与状态 / Reading current positions and status...")
+        info_before = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_before, "测试前状态 / Status Before Test")
+        check_servo_health(info_before)
+        positions_before = {info["id"]: info["position"] for info in info_before if info["position"] is not None}
 
         # Step 3: 启动力矩
         print("⚡ 启动力矩 / Enabling torque...")
@@ -148,18 +152,23 @@ def quick_center_test(port_name: str, target_position: int = MIDDLE_POSITION) ->
         print("\n⏳ 等待3秒... / Waiting 3 seconds...")
         time.sleep(3)
 
-        # Step 5: 读取最终位置
-        print("\n📍 读取最终位置 / Reading final positions...")
-        print("-" * 50)
+        # Step 5: 读取最终位置与状态
+        print("\n📍 读取最终位置与状态 / Reading final positions and status...")
+        info_after = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_after, "最终状态 / Final Status")
+        check_servo_health(info_after)
 
-        for servo_id in found_servos:
-            final_position, result, error = servo_handler.ReadPos(servo_id)
-            if result == COMM_SUCCESS and servo_id in positions_before:
-                movement = final_position - positions_before[servo_id]
+        # 打印位移摘要
+        print("\n📏 位移摘要 / Movement Summary:")
+        print("-" * 60)
+        for info in info_after:
+            servo_id = info["id"]
+            if servo_id in positions_before and info["position"] is not None:
+                movement = info["position"] - positions_before[servo_id]
                 movement_degrees = position_to_degrees(movement)
-                final_degrees = position_to_degrees(final_position)
-                print(f"  ID{servo_id}: {final_position:4d} ({final_degrees:6.1f}°) [位移/movement: {movement:+4d} ({movement_degrees:+5.1f}°)]")
-            time.sleep(0.05)
+                final_degrees = position_to_degrees(info["position"])
+                print(f"  ID{servo_id}: {info['position']:4d} ({final_degrees:6.1f}°) [位移/movement: {movement:+4d} ({movement_degrees:+5.1f}°)]")
+        print("-" * 60)
 
         print()
         print("=" * 50)

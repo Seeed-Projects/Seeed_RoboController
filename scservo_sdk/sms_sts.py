@@ -85,6 +85,26 @@ class sms_sts(protocol_packet_handler):
         moving, scs_comm_result, scs_error = self.read1ByteTxRx(scs_id, SMS_STS_MOVING)
         return moving, scs_comm_result, scs_error
 
+    def ReadVoltage(self, scs_id):
+        voltage, scs_comm_result, scs_error = self.read1ByteTxRx(scs_id, SMS_STS_PRESENT_VOLTAGE)
+        return voltage, scs_comm_result, scs_error
+
+    def ReadTemperature(self, scs_id):
+        temperature, scs_comm_result, scs_error = self.read1ByteTxRx(scs_id, SMS_STS_PRESENT_TEMPERATURE)
+        return temperature, scs_comm_result, scs_error
+
+    def ReadLoad(self, scs_id):
+        scs_present_load, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_PRESENT_LOAD_L)
+        return self.scs_tohost(scs_present_load, 15), scs_comm_result, scs_error
+
+    def ReadCurrent(self, scs_id):
+        scs_present_current, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_PRESENT_CURRENT_L)
+        return self.scs_tohost(scs_present_current, 15), scs_comm_result, scs_error
+
+    def ReadModelNumber(self, scs_id):
+        scs_model_number, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_MODEL_L)
+        return scs_model_number, scs_comm_result, scs_error
+
     def SyncWritePosEx(self, scs_id, position, speed, acc):
         position = self.scs_toscs(position, 15)
         txpacket = [acc, self.scs_lobyte(position), self.scs_hibyte(position), 0, 0, self.scs_lobyte(speed), self.scs_hibyte(speed)]
