@@ -4377,6 +4377,21 @@ def main():
         return
 
     app = QApplication(sys.argv)
+
+    # 设置 Ctrl+C 信号处理，使其能正常关闭 Qt 应用
+    import signal
+
+    def handle_sigint(signum, frame):
+        print("\n收到 Ctrl+C，正在关闭...")
+        app.quit()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    # 启动定时器让 Python 有机会处理信号
+    sig_timer = QTimer()
+    sig_timer.start(200)
+    sig_timer.timeout.connect(lambda: None)
+
     if THEME_UTILS_AVAILABLE:
         setup_light_theme(app)
     else:
