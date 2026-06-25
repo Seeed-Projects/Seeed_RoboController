@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QTextEdit, QGridLayout, QGroupBox,
     QMessageBox, QFrame, QStatusBar, QSplitter, QComboBox,
     QInputDialog, QSpinBox, QDialog, QFormLayout, QDialogButtonBox,
-    QTabWidget, QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView
+    QTabWidget, QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
+    QSlider
 )
 from PySide6.QtCore import QTimer, Signal, QObject, Qt
 from PySide6.QtGui import QFont, QPalette, QColor, QTextCursor
@@ -222,6 +223,7 @@ class ServoWorker(QObject):
     status_updated = Signal(list, bool, str)  # 舵机列表, 连接状态, 端口标识
     id_changed = Signal(int, int, bool, str, str)  # old_id, new_id, success, message, 端口标识
     log_message = Signal(str, str)  # 日志消息, 端口标识
+    positions_updated = Signal(dict)  # {servo_id: position} 当前位置更新
 
     def __init__(self, port_name: str, port_id: str):
         super().__init__()
@@ -241,6 +243,11 @@ class ServoWorker(QObject):
         self.id_change_thread = None
         self.id_change_running = False
 
+        # 单舵机控制队列（力矩、位置）
+        self.torque_queue = Queue()
+        self.position_queue = Queue()
+        self.command_event = threading.Event()  # 用于立即唤醒扫描线程处理命令
+
         # 扫描控制
         self.pause_scanning = False  # 是否暂停扫描
         self.rescan_requested = threading.Event()  # 手动重新扫描请求
@@ -248,6 +255,7 @@ class ServoWorker(QObject):
     def request_rescan(self):
         """请求立即重新扫描"""
         self.rescan_requested.set()
+        self.command_event.set()
         self.log_message.emit("🔄 收到重新扫描请求", self.port_id)
 
     def connect_servo(self) -> bool:
@@ -447,6 +455,76 @@ class ServoWorker(QObject):
             self.log_message.emit(f"❌ {error_msg}", self.port_id)
             return False, error_msg
 
+    def set_servo_torque(self, servo_id: int, enable: bool):
+        """设置单个舵机力矩（加入队列，由扫描线程串行执行）"""
+        self.torque_queue.put((servo_id, enable))
+        self.command_event.set()
+
+    def set_servo_position(self, servo_id: int, position: int):
+        """设置单个舵机目标位置（加入队列，由扫描线程串行执行）"""
+        self.position_queue.put((servo_id, position))
+        self.command_event.set()
+
+    def _process_commands(self):
+        """处理力矩和位置控制命令"""
+        if self.servo_handler is None or not self.is_connected:
+            # 清空队列，避免积压
+            while not self.torque_queue.empty():
+                try:
+                    self.torque_queue.get_nowait()
+                except Exception:
+                    break
+            while not self.position_queue.empty():
+                try:
+                    self.position_queue.get_nowait()
+                except Exception:
+                    break
+            return
+
+        # 处理力矩命令
+        while not self.torque_queue.empty():
+            try:
+                servo_id, enable = self.torque_queue.get_nowait()
+                value = 1 if enable else 0
+                result, error = self.servo_handler.write1ByteTxRx(servo_id, 40, value)
+                if result == COMM_SUCCESS:
+                    self.log_message.emit(
+                        f"{'⚡' if enable else '⏹️'} ID{servo_id} 力矩{'开启' if enable else '关闭'}", self.port_id
+                    )
+                else:
+                    self.log_message.emit(f"❌ ID{servo_id} 力矩设置失败", self.port_id)
+            except Exception as e:
+                self.log_message.emit(f"❌ 力矩命令异常: {e}", self.port_id)
+
+        # 处理位置命令
+        while not self.position_queue.empty():
+            try:
+                servo_id, position = self.position_queue.get_nowait()
+                # 确保力矩已开启
+                self.servo_handler.write1ByteTxRx(servo_id, 40, 1)
+                result, error = self.servo_handler.WritePosEx(servo_id, position, 1000, 50)
+                if result == COMM_SUCCESS:
+                    self.log_message.emit(f"🎯 ID{servo_id} -> {position}", self.port_id)
+                else:
+                    self.log_message.emit(f"❌ ID{servo_id} 位置写入失败", self.port_id)
+            except Exception as e:
+                self.log_message.emit(f"❌ 位置命令异常: {e}", self.port_id)
+
+    def _read_positions(self) -> dict:
+        """读取当前在线舵机的位置"""
+        positions = {}
+        if self.servo_handler is None or not self.is_connected:
+            return positions
+
+        for servo_id in self.current_servos:
+            try:
+                pos, result, error = self.servo_handler.ReadPos(servo_id)
+                if result == COMM_SUCCESS:
+                    positions[servo_id] = pos
+            except Exception:
+                pass
+        return positions
+
     def run_scanner(self):
         """运行扫描循环"""
         scan_count = 0
@@ -464,6 +542,13 @@ class ServoWorker(QObject):
         while self.running:
             try:
                 scan_count += 1
+
+                # 等待命令/重新扫描事件，最多1秒
+                self.command_event.wait(timeout=1.0)
+                self.command_event.clear()
+
+                # 优先处理单舵机控制命令（与扫描同线程，安全无冲突）
+                self._process_commands()
 
                 # 如果未连接，尝试重新连接
                 if not self.is_connected:
@@ -526,15 +611,17 @@ class ServoWorker(QObject):
                         print(f"[DEBUG] {self.port_id}: Emitting status_updated: servos={new_servos}, connected={self.is_connected}")
                         self.status_updated.emit(self.current_servos, self.is_connected, self.port_id)
 
+                # 读取并发送当前位置
+                positions = self._read_positions()
+                if positions:
+                    self.positions_updated.emit(positions)
+
                 # 每30次扫描显示一次状态（减少日志频率）
                 if scan_count % 30 == 0:
                     if self.current_servos:
                         self.log_message.emit(f"📊 当前舵机ID: {self.current_servos}", self.port_id)
                     else:
                         self.log_message.emit("📊 当前无舵机", self.port_id)
-
-                # 使用 Event.wait 等待，允许手动重新扫描立即中断等待
-                self.rescan_requested.wait(timeout=1.0)  # 扫描间隔
 
             except Exception as e:
                 consecutive_failures += 1
@@ -597,6 +684,9 @@ class ServoPanel(QWidget):
 
         # 标定面板
         self.create_calibration_panel(layout)
+
+        # 单舵机控制面板（作为独立 widget，后续放到单独标签页中）
+        self.servo_control_widget = self.create_servo_control_widget()
 
         # 日志面板
         self.create_log_panel(layout)
@@ -774,6 +864,153 @@ class ServoPanel(QWidget):
         calibration_layout.addLayout(button_layout)
         layout.addWidget(calibration_group)
 
+    def create_servo_control_widget(self):
+        """创建单舵机滑动条控制面板，返回一个可复用的 QWidget"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(10)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        control_group = QGroupBox(f"🎚️ 单舵机控制 - {self.port_name}")
+        control_layout = QVBoxLayout()
+        control_group.setLayout(control_layout)
+
+        # 全局力矩按钮
+        global_btn_layout = QHBoxLayout()
+
+        self.enable_all_torque_btn = QPushButton("⚡ 开启所有力矩")
+        self.enable_all_torque_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #218838; }
+            QPushButton:pressed { background-color: #1e7e34; }
+        """)
+        self.enable_all_torque_btn.clicked.connect(self.enable_all_torque)
+        global_btn_layout.addWidget(self.enable_all_torque_btn)
+
+        self.disable_all_torque_btn = QPushButton("⏹️ 关闭所有力矩")
+        self.disable_all_torque_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #c82333; }
+            QPushButton:pressed { background-color: #bd2130; }
+        """)
+        self.disable_all_torque_btn.clicked.connect(self.disable_all_torque)
+        global_btn_layout.addWidget(self.disable_all_torque_btn)
+
+        global_btn_layout.addStretch()
+        control_layout.addLayout(global_btn_layout)
+
+        # 每个舵机一行：ID | 当前位置 | 滑动条 | 目标位置 | 力矩开关
+        self.servo_sliders = {}
+        self.servo_pos_labels = {}
+        self.servo_target_labels = {}
+        self.servo_torque_btns = {}
+
+        for servo_id in range(1, 7):
+            row_layout = QHBoxLayout()
+            row_layout.setSpacing(8)
+
+            id_label = QLabel(f"ID{servo_id}")
+            id_label.setStyleSheet("font-weight: bold; font-size: 12px; min-width: 35px;")
+            row_layout.addWidget(id_label)
+
+            pos_label = QLabel("Pos: --")
+            pos_label.setStyleSheet("font-size: 11px; min-width: 65px;")
+            self.servo_pos_labels[servo_id] = pos_label
+            row_layout.addWidget(pos_label)
+
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 4095)
+            slider.setValue(2048)
+            slider.setEnabled(False)
+            slider.setStyleSheet("""
+                QSlider::groove:horizontal {
+                    border: 1px solid #bbb;
+                    height: 8px;
+                    background: #e9ecef;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background: #007bff;
+                    border: 1px solid #0056b3;
+                    width: 18px;
+                    margin: -5px 0;
+                    border-radius: 4px;
+                }
+                QSlider::sub-page:horizontal {
+                    background: #007bff;
+                    border-radius: 4px;
+                }
+            """)
+            slider.valueChanged.connect(lambda value, sid=servo_id: self.on_slider_value_changed(sid, value))
+            slider.sliderReleased.connect(lambda sid=servo_id: self.on_slider_released(sid))
+            self.servo_sliders[servo_id] = slider
+            row_layout.addWidget(slider, stretch=1)
+
+            target_label = QLabel("T: 2048")
+            target_label.setStyleSheet("font-size: 11px; min-width: 55px;")
+            self.servo_target_labels[servo_id] = target_label
+            row_layout.addWidget(target_label)
+
+            torque_btn = QPushButton("⚡ 力矩")
+            torque_btn.setCheckable(True)
+            torque_btn.setChecked(False)
+            torque_btn.setEnabled(False)
+            torque_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #6c757d;
+                    color: white;
+                    border: none;
+                    padding: 5px 10px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+                QPushButton:checked {
+                    background-color: #28a745;
+                }
+                QPushButton:hover {
+                    background-color: #5a6268;
+                }
+                QPushButton:checked:hover {
+                    background-color: #218838;
+                }
+            """)
+            torque_btn.toggled.connect(lambda checked, sid=servo_id: self.on_torque_toggled(sid, checked))
+            self.servo_torque_btns[servo_id] = torque_btn
+            row_layout.addWidget(torque_btn)
+
+            control_layout.addLayout(row_layout)
+
+        # 提示文字
+        tip_label = QLabel(
+            "💡 拖动滑块并松开后，舵机将移动到目标位置。未识别到的舵机无法操作。"
+        )
+        tip_label.setStyleSheet(
+            "background-color: #fff3cd; border: 1px solid #ffeeba; padding: 6px; "
+            "border-radius: 4px; color: #856404; font-size: 11px;"
+        )
+        tip_label.setWordWrap(True)
+        control_layout.addWidget(tip_label)
+
+        layout.addWidget(control_group)
+        return container
+
     def create_log_panel(self, layout):
         """创建日志面板"""
         log_group = QGroupBox("📋 操作日志")
@@ -803,6 +1040,7 @@ class ServoPanel(QWidget):
         self.worker.status_updated.connect(self.update_status)
         self.worker.id_changed.connect(self.on_id_changed)
         self.worker.log_message.connect(self.add_log)
+        self.worker.positions_updated.connect(self.update_positions)
 
         # 添加初始连接日志
         self.add_log("🔄 信号连接已建立", self.port_id)
@@ -843,6 +1081,9 @@ class ServoPanel(QWidget):
         # 更新按钮状态
         self.update_button_states(servos, connected)
 
+        # 更新单舵机控制面板状态
+        self.update_servo_control_state(servos, connected)
+
     def update_button_states(self, servos, connected):
         """更新按钮状态"""
         has_servos = connected and len(servos) > 0
@@ -881,6 +1122,96 @@ class ServoPanel(QWidget):
                         background-color: #c82333;
                     }
                 """)
+
+    def update_servo_control_state(self, servos, connected):
+        """根据在线舵机更新滑动条和力矩按钮可用状态"""
+        has_servos = connected and len(servos) > 0
+        servo_set = set(servos) if servos else set()
+
+        for servo_id in range(1, 7):
+            online = servo_id in servo_set and has_servos
+            slider = self.servo_sliders[servo_id]
+            torque_btn = self.servo_torque_btns[servo_id]
+
+            slider.setEnabled(online)
+            torque_btn.setEnabled(online)
+
+            if not online:
+                # 离线时重置显示
+                self.servo_pos_labels[servo_id].setText("Pos: --")
+                torque_btn.setChecked(False)
+                torque_btn.setText("⚡ 力矩")
+
+    def update_positions(self, positions: dict):
+        """更新各舵机当前位置显示"""
+        if not positions:
+            return
+
+        for servo_id, pos in positions.items():
+            if servo_id in self.servo_pos_labels:
+                self.servo_pos_labels[servo_id].setText(f"Pos: {pos}")
+
+    def on_slider_value_changed(self, servo_id: int, value: int):
+        """滑动条数值变化时更新目标位置显示"""
+        if servo_id in self.servo_target_labels:
+            self.servo_target_labels[servo_id].setText(f"T: {value}")
+
+    def on_slider_released(self, servo_id: int):
+        """滑动条释放后发送目标位置"""
+        if self.worker is None or not self.worker.is_connected:
+            QMessageBox.warning(self, "警告", "当前端口未连接，无法发送位置命令")
+            return
+
+        slider = self.servo_sliders[servo_id]
+        target = slider.value()
+
+        # 确认力矩已开启（若未开启则自动开启并提示）
+        torque_btn = self.servo_torque_btns[servo_id]
+        if not torque_btn.isChecked():
+            reply = QMessageBox.question(
+                self,
+                "力矩未开启",
+                f"ID{servo_id} 力矩未开启，是否先开启力矩再移动？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply != QMessageBox.Yes:
+                return
+            torque_btn.setChecked(True)
+
+        self.add_log(f"🎚️ ID{servo_id} 目标位置: {target}", self.port_id)
+        self.worker.set_servo_position(servo_id, target)
+
+    def on_torque_toggled(self, servo_id: int, checked: bool):
+        """单个舵机力矩按钮切换"""
+        if self.worker is None or not self.worker.is_connected:
+            return
+
+        btn = self.servo_torque_btns[servo_id]
+        btn.setText("⚡ ON" if checked else "⚡ OFF")
+        self.worker.set_servo_torque(servo_id, checked)
+
+    def enable_all_torque(self):
+        """开启所有在线舵机力矩"""
+        if self.worker is None or not self.worker.is_connected:
+            QMessageBox.warning(self, "警告", "当前端口未连接")
+            return
+
+        for servo_id in self.worker.current_servos:
+            if servo_id in self.servo_torque_btns:
+                self.servo_torque_btns[servo_id].setChecked(True)
+                self.worker.set_servo_torque(servo_id, True)
+
+    def disable_all_torque(self):
+        """关闭所有在线舵机力矩"""
+        if self.worker is None or not self.worker.is_connected:
+            QMessageBox.warning(self, "警告", "当前端口未连接")
+            return
+
+        for servo_id in self.worker.current_servos:
+            if servo_id in self.servo_torque_btns:
+                self.servo_torque_btns[servo_id].setChecked(False)
+                self.worker.set_servo_torque(servo_id, False)
 
     def change_servo_id(self, slot_index):
         """修改舵机ID - 弹出对话框让用户自定义源ID和目标ID"""
@@ -1376,31 +1707,6 @@ class EZToolUI(QMainWindow):
         buttons_container_layout.addLayout(buttons_row)
         buttons_layout.addWidget(buttons_container)
 
-        # 右上角遥控按钮
-        self.remote_btn = QPushButton("🎮 遥控")
-        self.remote_btn.setFixedSize(100, 40)
-        self.remote_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #10b981, stop:1 #059669);
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #059669, stop:1 #047857);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #047857, stop:1 #035b69);
-            }
-        """)
-        self.remote_btn.clicked.connect(self.toggle_remote_control)
-        header_layout.addWidget(self.remote_btn)
-
         main_layout.addLayout(header_layout)
 
         # 创建副标题
@@ -1444,7 +1750,21 @@ class EZToolUI(QMainWindow):
 
         self.tab_widget.addTab(servo_tab, "🦾 舵机标定")
 
-        # === Tab 2: 校准管理 ===
+        # === Tab 2: 单舵机控制 ===
+        single_control_tab = QWidget()
+        single_control_layout = QHBoxLayout(single_control_tab)
+        single_control_layout.setContentsMargins(10, 10, 10, 10)
+        single_control_layout.setSpacing(10)
+
+        single_control_splitter = QSplitter(Qt.Horizontal)
+        single_control_splitter.addWidget(self.left_panel.servo_control_widget)
+        single_control_splitter.addWidget(self.right_panel.servo_control_widget)
+        single_control_splitter.setSizes([800, 800])
+
+        single_control_layout.addWidget(single_control_splitter)
+        self.tab_widget.addTab(single_control_tab, "🎚️ 单舵机控制")
+
+        # === Tab 3: 校准管理 ===
         if CALIBRATION_MANAGER_AVAILABLE:
             calibration_tab = self.create_calibration_tab()
             self.tab_widget.addTab(calibration_tab, "📁 校准管理")
