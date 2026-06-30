@@ -24,6 +24,11 @@ from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QFont, QColor
 
 try:
+    from src.gui.theme_utils import setup_light_theme
+except ImportError:
+    setup_light_theme = None
+
+try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
@@ -1031,7 +1036,10 @@ def main():
         return
 
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')
+    if setup_light_theme:
+        setup_light_theme(app)
+    else:
+        app.setStyle('Fusion')
 
     # 使用命令行参数中的端口，但允许为None（自动检测）
     window = AngleLimitGUI(args.port)

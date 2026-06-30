@@ -44,6 +44,29 @@ SMS_STS_TORQUE_ON = 1
 SMS_STS_TORQUE_OFF = 0
 SMS_STS_CALIBRATE_MIDDLE = 128  # 校准命令：将当前位置设为2048
 
+# 安全阈值
+SAFE_TEMPERATURE_MAX = 60.0  # 最大安全温度 (°C)
+
+# 电压范围（根据 SO-ARM 官方规格自动适配）
+# SO-ARM100/101 标准版：DC 5V 4A；专业版：DC 12V 2A
+SAFE_VOLTAGE_RANGES = {
+    "5V": (4.5, 5.5),
+    "12V": (10.5, 13.5),
+}
+VOLTAGE_SYSTEM_THRESHOLD = 7.0  # 低于此值判定为 5V 系统，否则为 12V 系统
+
+
+def get_voltage_range(voltage: Optional[float]) -> tuple:
+    """
+    根据实测电压自动判断是 5V 系统还是 12V 系统，返回对应安全范围
+    """
+    if voltage is None:
+        # 无法判断时返回一个较宽的范围
+        return (4.5, 13.5)
+    if voltage < VOLTAGE_SYSTEM_THRESHOLD:
+        return SAFE_VOLTAGE_RANGES["5V"]
+    return SAFE_VOLTAGE_RANGES["12V"]
+
 
 def position_to_degrees(position: int) -> float:
     """将位置值转换为角度"""
@@ -136,6 +159,151 @@ def center_servo(servo_handler, servo_id: int) -> bool:
         return False
 
 
+def read_servo_info(servo_handler, servo_id: int) -> dict:
+    """
+    读取单个舵机的完整状态信息
+
+    返回字典包含：型号、位置、速度、负载、电压、温度、电流、运行状态
+    读取失败的字段值为 None
+    """
+    info = {
+        "id": servo_id,
+        "model": None,
+        "position": None,
+        "speed": None,
+        "load": None,
+        "voltage": None,
+        "temperature": None,
+        "current": None,
+        "moving": None,
+    }
+
+    # 型号
+    model, result, _ = servo_handler.ReadModelNumber(servo_id)
+    if result == COMM_SUCCESS:
+        info["model"] = model
+    time.sleep(0.02)
+
+    # 位置
+    pos, result, _ = servo_handler.ReadPos(servo_id)
+    if result == COMM_SUCCESS:
+        info["position"] = pos
+    time.sleep(0.02)
+
+    # 速度
+    speed, result, _ = servo_handler.ReadSpeed(servo_id)
+    if result == COMM_SUCCESS:
+        info["speed"] = speed
+    time.sleep(0.02)
+
+    # 负载
+    load, result, _ = servo_handler.ReadLoad(servo_id)
+    if result == COMM_SUCCESS:
+        info["load"] = load
+    time.sleep(0.02)
+
+    # 电压 (寄存器值为 0.1V)
+    voltage, result, _ = servo_handler.ReadVoltage(servo_id)
+    if result == COMM_SUCCESS:
+        info["voltage"] = voltage / 10.0
+    time.sleep(0.02)
+
+    # 温度
+    temperature, result, _ = servo_handler.ReadTemperature(servo_id)
+    if result == COMM_SUCCESS:
+        info["temperature"] = temperature
+    time.sleep(0.02)
+
+    # 电流
+    current, result, _ = servo_handler.ReadCurrent(servo_id)
+    if result == COMM_SUCCESS:
+        info["current"] = current
+    time.sleep(0.02)
+
+    # 运行状态
+    moving, result, _ = servo_handler.ReadMoving(servo_id)
+    if result == COMM_SUCCESS:
+        info["moving"] = bool(moving)
+    time.sleep(0.02)
+
+    return info
+
+
+def read_all_servo_info(servo_handler, servo_list: list) -> list:
+    """读取所有舵机的完整状态信息，返回列表"""
+    info_list = []
+    for servo_id in servo_list:
+        info = read_servo_info(servo_handler, servo_id)
+        info_list.append(info)
+        time.sleep(0.05)
+    return info_list
+
+
+def print_servo_info_table(info_list: list, title: str = "舵机状态 / Servo Status"):
+    """打印舵机状态信息表格"""
+    print(f"\n📊 {title}")
+    print("-" * 100)
+    header = (
+        f"{'ID':>4}  {'型号':>6}  {'位置':>6}  {'角度':>7}  "
+        f"{'速度':>6}  {'负载':>6}  {'电压':>6}  {'温度':>5}  {'电流':>6}  {'运行':>4}"
+    )
+    print(header)
+    print("-" * 100)
+
+    for info in info_list:
+        pos = info["position"]
+        deg = position_to_degrees(pos) if pos is not None else None
+
+        def fmt(value, spec, unit=""):
+            if value is None:
+                return "N/A"
+            return f"{value:{spec}}{unit}"
+
+        row = (
+            f"{info['id']:>4}  "
+            f"{fmt(info['model'], '>6')}  "
+            f"{fmt(pos, '>6')}  "
+            f"{fmt(deg, '>6.1f', '°')}  "
+            f"{fmt(info['speed'], '>6')}  "
+            f"{fmt(info['load'], '>6')}  "
+            f"{fmt(info['voltage'], '>5.1f', 'V')}  "
+            f"{fmt(info['temperature'], '>4', '°C')}  "
+            f"{fmt(info['current'], '>6')}  "
+            f"{'是' if info['moving'] else ('否' if info['moving'] is not None else 'N/A'):>4}"
+        )
+        print(row)
+
+    print("-" * 100)
+
+
+def check_servo_health(info_list: list):
+    """检查舵机健康状态并打印警告"""
+    warnings = []
+
+    for info in info_list:
+        sid = info["id"]
+        voltage = info.get("voltage")
+        temperature = info.get("temperature")
+
+        if voltage is not None:
+            v_min, v_max = get_voltage_range(voltage)
+            if voltage < v_min or voltage > v_max:
+                warnings.append(
+                    f"  ⚠️ ID{sid} 电压异常: {voltage:.1f}V (安全范围 {v_min:.1f}V ~ {v_max:.1f}V)"
+                )
+
+        if temperature is not None and temperature > SAFE_TEMPERATURE_MAX:
+            warnings.append(
+                f"  ⚠️ ID{sid} 温度过高: {temperature}°C (建议 < {SAFE_TEMPERATURE_MAX:.0f}°C)"
+            )
+
+    if warnings:
+        print("\n🚨 健康警告 / Health Warnings:")
+        for warning in warnings:
+            print(warning)
+        print()
+
+
 def interactive_calibration(port_name: str) -> bool:
     """
     交互式中位校准 - 逐步引导用户完成校准
@@ -170,6 +338,11 @@ def interactive_calibration(port_name: str) -> bool:
 
         print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
 
+        # 显示初始状态
+        initial_info = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(initial_info, "初始状态 / Initial Status")
+        check_servo_health(initial_info)
+
     except Exception as e:
         print(f"❌ 初始化异常 / Init error: {e}")
         return False
@@ -188,16 +361,12 @@ def interactive_calibration(port_name: str) -> bool:
         except (EOFError, KeyboardInterrupt):
             print("⏭️ 跳过失能 / Skipped\n")
 
-        # Step 3: 读取当前位置
-        print("📍 Step 3: 读取当前位置 / Reading current positions...")
-        print("-" * 50)
-        positions_before = read_positions(servo_handler, found_servos)
-        for servo_id in found_servos:
-            if servo_id in positions_before:
-                pos = positions_before[servo_id]
-                deg = position_to_degrees(pos)
-                print(f"  ID{servo_id}: {pos:4d} ({deg:6.1f}°)")
-        print()
+        # Step 3: 读取当前位置与状态
+        print("📍 Step 3: 读取当前位置与状态 / Reading current positions and status...")
+        info_before = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_before, "校准前状态 / Status Before Calibration")
+        check_servo_health(info_before)
+        positions_before = {info["id"]: info["position"] for info in info_before if info["position"] is not None}
 
         # Step 4: 提示用户手动调整位置
         print("=" * 50)
@@ -235,7 +404,12 @@ def interactive_calibration(port_name: str) -> bool:
             time.sleep(0.1)
 
         print(f"\n✅ {success_count}/{len(found_servos)} 个舵机校准完成 / {success_count}/{len(found_servos)} servos calibrated\n")
-        time.sleep(2)
+        time.sleep(1)
+
+        # 校准后状态
+        info_after_cal = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_after_cal, "校准后状态 / Status After Calibration")
+        check_servo_health(info_after_cal)
 
         # Step 6: 移动到中位测试
         print("🎯 Step 6: 移动到中位测试 / Move to center for testing")
@@ -257,16 +431,23 @@ def interactive_calibration(port_name: str) -> bool:
                 print("\n⏳ 等待3秒... / Waiting 3 seconds...")
                 time.sleep(3)
 
-                # 读取最终位置
-                print("\n📍 最终位置 / Final positions:")
-                print("-" * 50)
-                positions_after = read_positions(servo_handler, found_servos)
-                for servo_id in found_servos:
-                    if servo_id in positions_before and servo_id in positions_after:
-                        movement = positions_after[servo_id] - positions_before[servo_id]
+                # 读取最终位置与状态
+                print("\n📍 最终位置与状态 / Final positions and status:")
+                info_after = read_all_servo_info(servo_handler, found_servos)
+                print_servo_info_table(info_after, "最终状态 / Final Status")
+                check_servo_health(info_after)
+
+                # 打印位移摘要
+                print("\n📏 位移摘要 / Movement Summary:")
+                print("-" * 60)
+                for info in info_after:
+                    servo_id = info["id"]
+                    if servo_id in positions_before and info["position"] is not None:
+                        movement = info["position"] - positions_before[servo_id]
                         movement_deg = position_to_degrees(movement)
-                        final_deg = position_to_degrees(positions_after[servo_id])
-                        print(f"  ID{servo_id}: {positions_after[servo_id]:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+                        final_deg = position_to_degrees(info["position"])
+                        print(f"  ID{servo_id}: {info['position']:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+                print("-" * 60)
 
         except (EOFError, KeyboardInterrupt):
             print("⏭️ 跳过测试 / Skipped testing")
@@ -326,6 +507,11 @@ def auto_calibration(port_name: str) -> bool:
 
         print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
 
+        # 显示初始状态
+        initial_info = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(initial_info, "初始状态 / Initial Status")
+        check_servo_health(initial_info)
+
     except Exception as e:
         print(f"❌ 初始化异常 / Init error: {e}")
         return False
@@ -344,15 +530,12 @@ def auto_calibration(port_name: str) -> bool:
         input("调整完成后按回车 / Press Enter when ready...\n")
         print("=" * 50)
 
-        # 读取当前位置
-        print("📍 读取当前位置 / Reading current positions...")
-        positions_before = read_positions(servo_handler, found_servos)
-        for servo_id in found_servos:
-            if servo_id in positions_before:
-                pos = positions_before[servo_id]
-                deg = position_to_degrees(pos)
-                print(f"  ID{servo_id}: {pos:4d} ({deg:6.1f}°)")
-        print()
+        # 读取当前位置与状态
+        print("📍 读取当前位置与状态 / Reading current positions and status...")
+        info_before = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_before, "校准前状态 / Status Before Calibration")
+        check_servo_health(info_before)
+        positions_before = {info["id"]: info["position"] for info in info_before if info["position"] is not None}
 
         # 校准
         print("🔧 校准中位 / Calibrating middle...")
@@ -367,7 +550,12 @@ def auto_calibration(port_name: str) -> bool:
             time.sleep(0.1)
 
         print(f"\n✅ {success_count}/{len(found_servos)} 个舵机校准完成\n")
-        time.sleep(2)
+        time.sleep(1)
+
+        # 校准后状态
+        info_after_cal = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_after_cal, "校准后状态 / Status After Calibration")
+        check_servo_health(info_after_cal)
 
         # 移动到中位测试
         print("🎯 移动到中位测试 / Move to center for testing...")
@@ -378,15 +566,23 @@ def auto_calibration(port_name: str) -> bool:
         print("⏳ 等待3秒... / Waiting 3 seconds...")
         time.sleep(3)
 
-        # 读取最终位置
-        print("\n📍 最终位置 / Final positions:")
-        positions_after = read_positions(servo_handler, found_servos)
-        for servo_id in found_servos:
-            if servo_id in positions_before and servo_id in positions_after:
-                movement = positions_after[servo_id] - positions_before[servo_id]
+        # 读取最终位置与状态
+        print("\n📍 最终位置与状态 / Final positions and status:")
+        info_after = read_all_servo_info(servo_handler, found_servos)
+        print_servo_info_table(info_after, "最终状态 / Final Status")
+        check_servo_health(info_after)
+
+        # 打印位移摘要
+        print("\n📏 位移摘要 / Movement Summary:")
+        print("-" * 60)
+        for info in info_after:
+            servo_id = info["id"]
+            if servo_id in positions_before and info["position"] is not None:
+                movement = info["position"] - positions_before[servo_id]
                 movement_deg = position_to_degrees(movement)
-                final_deg = position_to_degrees(positions_after[servo_id])
-                print(f"  ID{servo_id}: {positions_after[servo_id]:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+                final_deg = position_to_degrees(info["position"])
+                print(f"  ID{servo_id}: {info['position']:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+        print("-" * 60)
 
         print()
         print("=" * 50)

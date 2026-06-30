@@ -55,12 +55,13 @@ def get_available_ports(include_virtual=False):
                     return 4  # tty.* 设备（阻塞，优先级较低）
                 return 5
 
-            # Linux: USB 设备优先
+            # Linux: USB 设备优先，过滤虚拟串口 ttyS*
             elif system == "Linux":
                 if "ttyUSB" in device or "ttyACM" in device:
                     return 1
                 if "ttyS" in device:
-                    return 2
+                    # /dev/ttyS* 是 Linux 虚拟串口，通常不是真实舵机控制器
+                    return 999
                 return 3
 
             # Windows: COM 端口按编号排序
