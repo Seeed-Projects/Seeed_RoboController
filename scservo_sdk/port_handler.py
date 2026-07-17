@@ -24,11 +24,29 @@ class PortHandler(object):
         return self.setBaudRate(self.baudrate)
 
     def closePort(self):
-        self.ser.close()
+        if self.ser is not None:
+            try:
+                if self.ser.is_open:
+                    # 清空缓冲区后再关闭，避免 Windows 下句柄未完全释放
+                    try:
+                        self.ser.reset_input_buffer()
+                        self.ser.reset_output_buffer()
+                    except Exception:
+                        pass
+                    self.ser.close()
+            except Exception:
+                pass
+            finally:
+                self.ser = None
         self.is_open = False
 
+        # Windows 需要一点时间才能真正释放 COM 端口句柄
+        if platform.system() == "Windows":
+            time.sleep(0.2)
+
     def clearPort(self):
-        self.ser.flush()
+        if self.ser is not None and self.ser.is_open:
+            self.ser.flush()
 
     def setPortName(self, port_name):
         self.port_name = port_name
@@ -90,6 +108,10 @@ class PortHandler(object):
     def setupPort(self, cflag_baud):
         if self.is_open:
             self.closePort()
+
+        # Windows 下 closePort 已经加了 0.2s 延迟，这里再加一层保险
+        if platform.system() == "Windows":
+            time.sleep(0.1)
 
         self.ser = serial.Serial(
             port=self.port_name,

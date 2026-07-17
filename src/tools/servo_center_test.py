@@ -181,13 +181,14 @@ def quick_center_test(port_name: str, target_position: int = MIDDLE_POSITION) ->
         print("   If servos moved significantly, recalibration is needed")
         print("=" * 50)
 
-        # 力矩保持开启以便观察
-        print("\n⚡ 力矩保持开启 / Torque stays enabled for observation")
-        print("   按 Ctrl+C 退出 / Press Ctrl+C to exit")
-
-        # 等待用户中断
-        while True:
-            time.sleep(1)
+        # 力矩在舵机侧保持开启（串口关闭后依然有效），无需占用串口等待。
+        # 注意: 之前这里用 while True 无限挂起进程，导致 Windows 上串口被独占，
+        # 后续“失能电机”等操作无法打开串口 (PermissionError)，GUI 扫描线程也无法恢复。
+        print("\n⚡ 力矩保持开启（舵机侧）/ Torque stays enabled on servos")
+        print("   观察 5 秒后自动退出 / Auto-exit after 5s of observation...")
+        time.sleep(5)
+        print("👋 测试进程退出，释放串口 / Exiting, port released")
+        return True
 
     except KeyboardInterrupt:
         print("\n\n⏹️ 用户中断 / User interrupted")
