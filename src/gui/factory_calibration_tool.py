@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QTextEdit, QGridLayout, QGroupBox,
     QMessageBox, QFrame, QStatusBar, QSplitter, QComboBox,
     QInputDialog, QSpinBox, QDialog, QFormLayout, QDialogButtonBox,
-    QTabWidget, QSlider
+    QTabWidget, QSlider, QScrollArea
 )
 from PySide6.QtCore import QTimer, Signal, QObject, Qt
 from PySide6.QtGui import QFont, QPalette, QColor, QTextCursor
@@ -290,6 +290,7 @@ class ServoWorker(QObject):
         self.is_connected = False
         self.current_servos = []
         self.running = False
+        self._scanner_thread = None  # 扫描线程引用，stop() 时等待其退出
 
         # 连接配置
         self.baud_rate = 1000000
@@ -324,6 +325,18 @@ class ServoWorker(QObject):
         try:
             print(f"[DEBUG] {self.port_id}: Attempting to connect to {self.port_name}")
             self.log_message.emit(f"正在连接舵机控制器: {self.port_name}", self.port_id)
+
+            # 如果已有旧连接，先彻底关闭并释放（Windows 必须等句柄释放）
+            if self.port_handler is not None:
+                try:
+                    self.port_handler.closePort()
+                except Exception as e:
+                    print(f"[DEBUG] {self.port_id}: 关闭旧端口时异常: {e}")
+                self.port_handler = None
+                self.servo_handler = None
+                if os.name == 'nt':
+                    time.sleep(0.3)
+
             self.port_handler = PortHandler(self.port_name)
 
             if not self.port_handler.openPort():
@@ -353,10 +366,13 @@ class ServoWorker(QObject):
         try:
             if self.port_handler:
                 self.port_handler.closePort()
-                self.is_connected = False
-                self.log_message.emit("🔌 舵机控制器已断开", self.port_id)
-        except:
-            pass
+        except Exception as e:
+            print(f"[DEBUG] {self.port_id}: 断开连接异常: {e}")
+        finally:
+            self.is_connected = False
+            self.port_handler = None
+            self.servo_handler = None
+            self.log_message.emit("🔌 舵机控制器已断开", self.port_id)
 
     def ping_servo(self, servo_id: int) -> bool:
         """检测舵机是否存在"""
@@ -991,6 +1007,9 @@ class ServoWorker(QObject):
                     if consecutive_failures < max_failures:
                         self.log_message.emit(f"🔄 尝试重新连接... (第{consecutive_failures + 1}次)", self.port_id)
                         time.sleep(2)  # 等待2秒再重试
+                        # stop() 期间禁止重连，否则会重新打开串口导致端口泄漏
+                        if not self.running:
+                            break
                         if self.connect_servo():
                             consecutive_failures = 0  # 重置失败计数
                         else:
@@ -1001,6 +1020,8 @@ class ServoWorker(QObject):
                         self.log_message.emit(f"⚠️ 连续失败{max_failures}次，等待10秒后重试...", self.port_id)
                         time.sleep(10)
                         consecutive_failures = 0  # 重置计数
+                        if not self.running:
+                            break
                         continue
 
                 # 检查是否暂停扫描（ID修改期间）
@@ -1106,15 +1127,29 @@ class ServoWorker(QObject):
 
     def start(self):
         """启动工作线程"""
-        if not self.running:
-            self.running = True
-            threading.Thread(target=self.run_scanner, daemon=True).start()
+        # 旧扫描线程尚未退出时不重复创建，避免两个线程并发操作同一串口
+        if self._scanner_thread and self._scanner_thread.is_alive():
+            self.running = True  # 让旧线程继续循环
+            return
+        self.running = True
+        self._scanner_thread = threading.Thread(target=self.run_scanner, daemon=True)
+        self._scanner_thread.start()
 
     def stop(self):
         """停止工作线程"""
         self.running = False
         self.id_change_running = False
         self.system_command_running = False
+
+        # 先唤醒并等待扫描线程退出，再断开串口。
+        # 否则线程可能在 stop 之后重连/扫描：重新打开串口造成占用
+        # （Windows 上会导致后续子进程 PermissionError），或访问已删除对象。
+        self.command_event.set()
+        if self._scanner_thread and self._scanner_thread.is_alive():
+            self._scanner_thread.join(timeout=3)
+        if self._scanner_thread and not self._scanner_thread.is_alive():
+            self._scanner_thread = None
+
         self.disconnect_servo()
 
         # 等待ID修改线程结束
@@ -2623,6 +2658,11 @@ class EZToolUI(QMainWindow):
         # 可用串口列表
         self.available_ports = []
 
+        # 每个串口当前运行的工具子进程（校准/中位测试/失能）及操作代次。
+        # 新操作到来时先终止旧进程，避免 Windows 串口被独占导致后续操作静默失败
+        self._tool_procs = {}
+        self._tool_gen = {}
+
         self.init_ui()
         self.init_connections()
         self.refresh_ports()
@@ -2645,7 +2685,13 @@ class EZToolUI(QMainWindow):
     def init_ui(self):
         """初始化界面"""
         self.setWindowTitle("🏭 双串口工厂舵机标定工具")
-        self.setGeometry(50, 50, 1600, 900)
+        # 初始尺寸限制在屏幕可用区域内：
+        # 否则在 125%/150% 缩放的 Windows 小屏上，窗口比屏幕还大，
+        # 最大化时窗口反而缩小，面板内容高度不足导致控件相互重叠
+        screen_rect = QApplication.primaryScreen().availableGeometry()
+        init_w = min(1600, screen_rect.width() - 40)
+        init_h = min(900, screen_rect.height() - 40)
+        self.setGeometry(20, 20, init_w, init_h)
 
         # 设置字体
         font = QFont("Microsoft YaHei", 10)
@@ -2967,17 +3013,17 @@ class EZToolUI(QMainWindow):
         # 添加6个快捷按钮到舵机标定页
         servo_tab_layout.addLayout(buttons_layout)
 
-        # 创建分割器
+        # 创建分割器（stretch=1：多余垂直空间全部分给面板区，按钮行保持紧凑）
         splitter = QSplitter(Qt.Horizontal)
-        servo_tab_layout.addWidget(splitter)
+        servo_tab_layout.addWidget(splitter, 1)
 
-        # 创建左侧面板
+        # 创建左侧面板（包在滚动区域内，高度不足时出滚动条而不是控件重叠）
         self.left_panel = ServoPanel(self.left_port, "left")
-        splitter.addWidget(self.left_panel)
+        splitter.addWidget(self._wrap_in_scroll_area(self.left_panel))
 
         # 创建右侧面板
         self.right_panel = ServoPanel(self.right_port, "right")
-        splitter.addWidget(self.right_panel)
+        splitter.addWidget(self._wrap_in_scroll_area(self.right_panel))
 
         # 设置分割器比例
         splitter.setSizes([800, 800])
@@ -2991,8 +3037,8 @@ class EZToolUI(QMainWindow):
         single_control_layout.setSpacing(10)
 
         single_control_splitter = QSplitter(Qt.Horizontal)
-        single_control_splitter.addWidget(self.left_panel.servo_control_widget)
-        single_control_splitter.addWidget(self.right_panel.servo_control_widget)
+        single_control_splitter.addWidget(self._wrap_in_scroll_area(self.left_panel.servo_control_widget))
+        single_control_splitter.addWidget(self._wrap_in_scroll_area(self.right_panel.servo_control_widget))
         single_control_splitter.setSizes([800, 800])
 
         single_control_layout.addWidget(single_control_splitter)
@@ -3007,8 +3053,8 @@ class EZToolUI(QMainWindow):
         advanced_splitter = QSplitter(Qt.Horizontal)
         self.left_advanced_panel = AdvancedToolsPanel(self.left_panel)
         self.right_advanced_panel = AdvancedToolsPanel(self.right_panel)
-        advanced_splitter.addWidget(self.left_advanced_panel)
-        advanced_splitter.addWidget(self.right_advanced_panel)
+        advanced_splitter.addWidget(self._wrap_in_scroll_area(self.left_advanced_panel))
+        advanced_splitter.addWidget(self._wrap_in_scroll_area(self.right_advanced_panel))
         advanced_splitter.setSizes([800, 800])
 
         advanced_tab_layout.addWidget(advanced_splitter)
@@ -3020,6 +3066,16 @@ class EZToolUI(QMainWindow):
                 background-color: #f8f9fa;
             }
         """)
+
+    @staticmethod
+    def _wrap_in_scroll_area(widget):
+        """把面板包进滚动区域：窗口高度不足时显示滚动条，
+        避免布局被过度压缩导致控件（如ID标定1-6按钮）相互重叠"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(widget)
+        return scroll
 
     def init_connections(self):
         """初始化信号连接"""
@@ -3112,10 +3168,55 @@ class EZToolUI(QMainWindow):
         else:
             self.add_remote_log(f"❌ {message}")
 
+    def _begin_tool_action(self, port_name: str) -> int:
+        """开始一个串口工具操作（校准/中位测试/失能）。
+
+        递增该端口的操作代次，并终止该端口上一个仍在运行的工具子进程，
+        保证新操作一定能拿到串口（Windows 下串口独占，旧进程不释放就会 PermissionError）。
+        返回本次操作的代次号。
+        """
+        gen = self._tool_gen.get(port_name, 0) + 1
+        self._tool_gen[port_name] = gen
+
+        proc = self._tool_procs.get(port_name)
+        if proc is not None and proc.poll() is None:
+            self.add_remote_log(f"⏹️ 终止{port_name}上一个仍在运行的工具进程，释放串口...")
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._tool_procs.pop(port_name, None)
+        return gen
+
+    def _is_latest_tool_action(self, port_name: str, gen: int) -> bool:
+        """判断本次操作是否仍是该端口最新的操作（被新操作取代的旧线程不应再恢复扫描线程）"""
+        return self._tool_gen.get(port_name) == gen
+
+    def _register_tool_process(self, port_name: str, process):
+        """登记该端口当前运行的工具子进程"""
+        self._tool_procs[port_name] = process
+
+    def _tool_panel_log(self, port_name: str, message: str):
+        """把工具执行结果写到对应面板的操作日志（经 worker 信号转发，线程安全），
+        避免失败信息只在状态栏一闪而过导致用户以为"没反应\""""
+        panel = self.left_panel if port_name == self.left_port else self.right_panel
+        try:
+            if panel is not None and panel.worker is not None:
+                panel.worker.log_message.emit(message, panel.port_id)
+        except Exception:
+            pass
+
     def run_quick_calibration(self, port_name: str):
         """快速中位校准 - 非阻塞执行"""
         self.add_remote_log(f"🔧 开始{port_name}快速中位校准...")
         self.status_bar.showMessage(f"正在执行{port_name}中位校准...", 5000)
+
+        # 先终止该端口上一个仍在运行的工具进程，确保能拿到串口
+        gen = self._begin_tool_action(port_name)
 
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker.is_connected:
@@ -3131,13 +3232,13 @@ class EZToolUI(QMainWindow):
 
         # 使用线程非阻塞执行
         from threading import Thread
-        thread = Thread(target=self._execute_quick_calibration, args=(port_name,))
+        thread = Thread(target=self._execute_quick_calibration, args=(port_name, gen))
         thread.daemon = True
         thread.start()
 
         self.add_remote_log(f"📝 {port_name}校准进程已启动，请等待执行完成")
 
-    def _execute_quick_calibration(self, port_name: str):
+    def _execute_quick_calibration(self, port_name: str, gen: int):
         """执行快速中位校准的线程函数"""
         try:
             self.add_remote_log(f"🔍 查找校准脚本...")
@@ -3166,6 +3267,7 @@ class EZToolUI(QMainWindow):
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
+            self._register_tool_process(port_name, process)
 
             # 监控输出
             important_keywords = ["连接", "扫描", "校准", "完成", "失败", "错误", "成功", "发现"]
@@ -3183,11 +3285,17 @@ class EZToolUI(QMainWindow):
                     break
 
             return_code = process.wait()
+            self._tool_procs.pop(port_name, None)
+            if not self._is_latest_tool_action(port_name, gen):
+                self.add_remote_log(f"ℹ️ {port_name}中位校准已被新操作中断/取代")
+                return
             if return_code == 0:
                 self.add_remote_log(f"✅ {port_name}中位校准完成 - 进程正常退出")
+                self._tool_panel_log(port_name, f"✅ {port_name}中位校准完成")
                 self.status_bar.showMessage(f"{port_name}校准完成", 3000)
             else:
                 self.add_remote_log(f"❌ {port_name}中位校准失败 - 退出码: {return_code}")
+                self._tool_panel_log(port_name, f"❌ {port_name}中位校准失败 - 退出码: {return_code}")
                 self.status_bar.showMessage(f"{port_name}校准失败", 3000)
 
             # 重新启动相应端口的扫描线程
@@ -3203,9 +3311,13 @@ class EZToolUI(QMainWindow):
                 self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
 
         except Exception as e:
+            self._tool_procs.pop(port_name, None)
             self.add_remote_log(f"❌ {port_name}校准异常: {e}")
+            self._tool_panel_log(port_name, f"❌ {port_name}校准异常: {e}")
             self.status_bar.showMessage(f"{port_name}校准异常: {e}", 3000)
-            # 即使出现异常也要尝试重新启动扫描线程
+            # 即使出现异常也要尝试重新启动扫描线程（被新操作取代时除外）
+            if not self._is_latest_tool_action(port_name, gen):
+                return
             try:
                 import time
                 time.sleep(1.0)
@@ -3223,6 +3335,9 @@ class EZToolUI(QMainWindow):
         self.add_remote_log(f"🧪 开始{port_name}中位测试...")
         self.status_bar.showMessage(f"正在执行{port_name}中位测试...", 5000)
 
+        # 先终止该端口上一个仍在运行的工具进程，确保能拿到串口
+        gen = self._begin_tool_action(port_name)
+
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker.is_connected:
             self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备测试")
@@ -3236,13 +3351,13 @@ class EZToolUI(QMainWindow):
         time.sleep(1.0)
 
         from threading import Thread
-        thread = Thread(target=self._execute_quick_test, args=(port_name,))
+        thread = Thread(target=self._execute_quick_test, args=(port_name, gen))
         thread.daemon = True
         thread.start()
 
         self.add_remote_log(f"📝 {port_name}测试进程已启动，请等待执行完成")
 
-    def _execute_quick_test(self, port_name: str):
+    def _execute_quick_test(self, port_name: str, gen: int):
         """执行快速中位测试的线程函数"""
         try:
             # 使用 -m 模块方式运行，确保能找到 scservo_sdk
@@ -3258,6 +3373,7 @@ class EZToolUI(QMainWindow):
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
+            self._register_tool_process(port_name, process)
 
             # 监控输出
             while process.poll() is None:
@@ -3271,10 +3387,16 @@ class EZToolUI(QMainWindow):
                     break
 
             return_code = process.wait()
+            self._tool_procs.pop(port_name, None)
+            if not self._is_latest_tool_action(port_name, gen):
+                self.add_remote_log(f"ℹ️ {port_name}中位测试已被新操作中断/取代")
+                return
             if return_code == 0:
                 self.add_remote_log(f"✅ {port_name}中位测试完成")
+                self._tool_panel_log(port_name, f"✅ {port_name}中位测试完成（力矩保持开启，点“失能电机”可松开）")
             else:
                 self.add_remote_log(f"❌ {port_name}中位测试失败")
+                self._tool_panel_log(port_name, f"❌ {port_name}中位测试失败 - 退出码: {return_code}")
 
             # 重新启动相应端口的扫描线程
             import time
@@ -3288,8 +3410,12 @@ class EZToolUI(QMainWindow):
                 self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
 
         except Exception as e:
+            self._tool_procs.pop(port_name, None)
             self.add_remote_log(f"❌ {port_name}测试异常: {e}")
-            # 即使出现异常也要尝试重新启动扫描线程
+            self._tool_panel_log(port_name, f"❌ {port_name}测试异常: {e}")
+            # 即使出现异常也要尝试重新启动扫描线程（被新操作取代时除外）
+            if not self._is_latest_tool_action(port_name, gen):
+                return
             try:
                 import time
                 time.sleep(0.5)
@@ -3305,6 +3431,10 @@ class EZToolUI(QMainWindow):
         self.add_remote_log(f"⏹️ 开始{port_name}失能电机...")
         self.status_bar.showMessage(f"正在执行{port_name}失能电机...", 5000)
 
+        # 先终止该端口上一个仍在运行的工具进程（如中位测试），确保能拿到串口。
+        # 否则 Windows 串口独占会让失能进程打不开端口，表现为"点失能没反应"
+        gen = self._begin_tool_action(port_name)
+
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker and self.left_panel.worker.is_connected:
             self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备失能")
@@ -3318,13 +3448,13 @@ class EZToolUI(QMainWindow):
         time.sleep(1.0)
 
         from threading import Thread
-        thread = Thread(target=self._execute_quick_disable, args=(port_name,))
+        thread = Thread(target=self._execute_quick_disable, args=(port_name, gen))
         thread.daemon = True
         thread.start()
 
         self.add_remote_log(f"📝 {port_name}失能进程已启动，请等待执行完成")
 
-    def _execute_quick_disable(self, port_name: str):
+    def _execute_quick_disable(self, port_name: str, gen: int):
         """执行快速失能电机的线程函数"""
         try:
             # 使用 -m 模块方式运行，确保能找到 scservo_sdk
@@ -3344,6 +3474,7 @@ class EZToolUI(QMainWindow):
                 bufsize=1,
                 cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             )
+            self._register_tool_process(port_name, process)
 
             # 监控输出 - 显示重要信息
             important_keywords = ["连接", "扫描", "失能", "完成", "失败", "错误", "成功", "发现", "扭矩", "旋转"]
@@ -3357,15 +3488,24 @@ class EZToolUI(QMainWindow):
                             # 只显示包含重要关键词的日志
                             if any(keyword in line for keyword in important_keywords):
                                 self.add_remote_log(f"[{port_name}] {line}")
+                            # 失败/错误类信息同时写到面板日志，避免用户看不到原因
+                            if "❌" in line or "无法打开" in line or "错误" in line:
+                                self._tool_panel_log(port_name, line)
                 except:
                     break
 
             return_code = process.wait()
+            self._tool_procs.pop(port_name, None)
+            if not self._is_latest_tool_action(port_name, gen):
+                self.add_remote_log(f"ℹ️ {port_name}失能操作已被新操作中断/取代")
+                return
             if return_code == 0:
                 self.add_remote_log(f"✅ {port_name}电机已失能，可手动旋转")
+                self._tool_panel_log(port_name, f"✅ {port_name}电机已失能，可手动旋转")
                 self.status_bar.showMessage(f"{port_name}失能完成", 3000)
             else:
                 self.add_remote_log(f"❌ {port_name}失能失败 - 退出码: {return_code}")
+                self._tool_panel_log(port_name, f"❌ {port_name}失能失败 - 退出码: {return_code}，请重试")
                 self.status_bar.showMessage(f"{port_name}失能失败", 3000)
 
             # 重新启动相应端口的扫描线程
@@ -3380,9 +3520,13 @@ class EZToolUI(QMainWindow):
                 self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
 
         except Exception as e:
+            self._tool_procs.pop(port_name, None)
             self.add_remote_log(f"❌ {port_name}失能异常: {e}")
+            self._tool_panel_log(port_name, f"❌ {port_name}失能异常: {e}")
             self.status_bar.showMessage(f"{port_name}失能异常: {e}", 3000)
-            # 即使出现异常也要尝试重新启动扫描线程
+            # 即使出现异常也要尝试重新启动扫描线程（被新操作取代时除外）
+            if not self._is_latest_tool_action(port_name, gen):
+                return
             try:
                 import time
                 time.sleep(0.5)
@@ -3399,7 +3543,11 @@ class EZToolUI(QMainWindow):
         """添加遥控日志"""
         timestamp = time.strftime("%H:%M:%S")
         log_entry = f"[REMOTE] {message}"
-        print(f"[REMOTE] {log_entry}")
+        try:
+            print(f"[REMOTE] {log_entry}")
+        except UnicodeEncodeError:
+            # GBK 控制台下 emoji 无法编码，降级为可显示字符，避免整个按钮动作被异常打断
+            print(f"[REMOTE] {log_entry.encode('gbk', 'replace').decode('gbk')}")
         self.status_bar.showMessage(f"遥控: {message}", 3000)
 
     def on_remote_started(self):

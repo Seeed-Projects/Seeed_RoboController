@@ -1,6 +1,7 @@
 <div align="center">
 
 # Seeed Studio SoARM 系列校准工具
+
 # Seeed Studio SoARM Series Calibration Tool
 
 **专为 Seeed Studio SoARM 10X 系列机械臂设计的 FTServo 舵机工厂校准与 LeRobot 校准工具包**
@@ -19,16 +20,17 @@
 
 ## 功能特性
 
-| 特性 | 说明 |
-|------|------|
-| 自动端口检测 | 智能识别 USB 串口，自动过滤虚拟设备 |
-| 跨平台支持 | Windows / Ubuntu / macOS 全平台兼容 |
-| 交互式选择 | 友好的命令行交互，轻松选择串口 |
-| 双端口同步 | 支持主从双端口同步遥控控制 |
-| GUI 工具 | Qt 图形界面，直观易用 |
-| 自动扫描 | 自动检测 ID 1-20 范围内所有舵机 |
-| LeRobot 校准 | 生成 LeRobot 格式的 JSON 校准文件 |
-| 校准文件中位运行 | 根据校准文件将机械臂移动到中位 |
+
+| 特性             | 说明                                |
+| ---------------- | ----------------------------------- |
+| 自动端口检测     | 智能识别 USB 串口，自动过滤虚拟设备 |
+| 跨平台支持       | Windows / Ubuntu / macOS 全平台兼容 |
+| 交互式选择       | 友好的命令行交互，轻松选择串口      |
+| 双端口同步       | 支持主从双端口同步遥控控制          |
+| GUI 工具         | Qt 图形界面，直观易用               |
+| 自动扫描         | 自动检测 ID 1-20 范围内所有舵机     |
+| LeRobot 校准     | 生成 LeRobot 格式的 JSON 校准文件   |
+| 校准文件中位运行 | 根据校准文件将机械臂移动到中位      |
 
 ---
 
@@ -54,7 +56,9 @@ pip install -r requirements.txt
 ```bash
 python setup.py
 ```
+
 ### 4 开始使用
+
 ```bash
 # 交互式选择端口
 python -m src.gui.factory_calibration_tool
@@ -64,4 +68,3 @@ python -m src.gui.factory_calibration_tool --port1 /dev/ttyUSB0 --port2 /dev/tty
 ```
 
 ---
-
