@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-EZ Tool - 简化版双串口工厂舵机标定工具
-基于原始工具，只增加一个中间值校准按钮
+EZ Tool - Simplified dual-serial-port factory servo calibration tool
+Based on the original tool, with just one added mid-point calibration button
 """
 
 import sys
@@ -95,7 +95,7 @@ SERVO_MODEL_NAME_MAP = {
 
 
 def get_servo_model_name(model_number):
-    """根据型号编号获取舵机型号名称，未知则返回原始编号字符串"""
+    """Get the servo model name from its model number; returns the raw number string if unknown"""
     if model_number is None:
         return "--"
     name = SERVO_MODEL_NAME_MAP.get(model_number)
@@ -112,7 +112,7 @@ SMS_STS_CALIBRATE_MIDDLE = 128  # 中位校准命令值（将当前位置设为 
 
 
 class RemoteControlWorker(QObject):
-    """遥控操作后台工作线程"""
+    """Remote-control operation background worker thread"""
     status_updated = Signal(str)  # 状态更新信号
     log_message = Signal(str)   # 日志消息信号
     control_started = Signal()  # 遥控启动信号
@@ -127,9 +127,9 @@ class RemoteControlWorker(QObject):
         self.control_port = control_port
 
     def start_remote_control(self):
-        """启动遥控操作"""
+        """Start remote-control operation"""
         if self.running:
-            return False, "遥控操作已在运行"
+            return False, "Remote-control operation already running"
 
         try:
             # 使用 -m 模块方式运行，确保能找到 scservo_sdk
@@ -152,21 +152,21 @@ class RemoteControlWorker(QObject):
             )
 
             self.running = True
-            self.log_message.emit("🚀 遥控操作已启动 (10ms更新间隔)")
+            self.log_message.emit("🚀 Remote-control operation started (10ms update interval)")
             self.control_started.emit()
 
             # 启动监控线程
             threading.Thread(target=self._monitor_process, daemon=True).start()
 
-            return True, "遥控操作启动成功"
+            return True, "Remote-control operation started successfully"
 
         except Exception as e:
-            return False, f"启动遥控操作失败: {e}"
+            return False, f"Failed to start remote-control operation: {e}"
 
     def stop_remote_control(self):
-        """停止遥控操作"""
+        """Stop remote-control operation"""
         if not self.running:
-            return False, "遥控操作未运行"
+            return False, "Remote-control operation not running"
 
         try:
             if self.remote_process:
@@ -181,15 +181,15 @@ class RemoteControlWorker(QObject):
 
             self.running = False
             self.remote_process = None
-            self.log_message.emit("⏹️ 遥控操作已停止")
+            self.log_message.emit("⏹️ Remote-control operation stopped")
             self.control_stopped.emit()
-            return True, "遥控操作停止成功"
+            return True, "Remote-control operation stopped successfully"
 
         except Exception as e:
-            return False, f"停止遥控操作失败: {e}"
+            return False, f"Failed to stop remote-control operation: {e}"
 
     def _monitor_process(self):
-        """监控遥控进程的输出"""
+        """Monitor remote-control process output"""
         if not self.remote_process:
             return
 
@@ -199,28 +199,28 @@ class RemoteControlWorker(QObject):
                 if line:
                     line = line.strip()
                     if line:
-                        self.log_message.emit(f"遥控: {line}")
+                        self.log_message.emit(f"Remote: {line}")
                 time.sleep(0.1)
 
             # 进程结束
             if self.remote_process.poll() is not None:
                 self.running = False
                 self.remote_process = None
-                self.log_message.emit("🔚 遥控进程已结束")
+                self.log_message.emit("🔚 Remote-control process ended")
                 self.control_stopped.emit()
 
         except Exception as e:
-            self.log_message.emit(f"监控遥控进程异常: {e}")
+            self.log_message.emit(f"Exception monitoring remote-control process: {e}")
             self.running = False
             self.control_stopped.emit()
 
 
 class IDChangeDialog(QDialog):
-    """修改舵机ID对话框 - 允许用户自定义源ID和目标ID"""
+    """Change servo ID dialog - lets the user set a custom source ID and target ID"""
 
     def __init__(self, current_servos, default_old_id=None, default_new_id=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("修改舵机ID")
+        self.setWindowTitle("Change Servo ID")
         self.setMinimumWidth(280)
         self.setStyleSheet("""
             QDialog { background-color: #f8f9fa; color: #212529; }
@@ -245,12 +245,12 @@ class IDChangeDialog(QDialog):
         # 源ID（下拉选择当前在线的舵机）
         self.old_id_combo = QComboBox()
         for servo_id in sorted(current_servos):
-            self.old_id_combo.addItem(f"舵机 ID {servo_id}", servo_id)
+            self.old_id_combo.addItem(f"Servo ID {servo_id}", servo_id)
         if default_old_id and default_old_id in current_servos:
             index = self.old_id_combo.findData(default_old_id)
             if index >= 0:
                 self.old_id_combo.setCurrentIndex(index)
-        layout.addRow("源舵机ID:", self.old_id_combo)
+        layout.addRow("Source Servo ID:", self.old_id_combo)
 
         # 目标ID（数字输入）
         self.new_id_input = QSpinBox()
@@ -259,7 +259,7 @@ class IDChangeDialog(QDialog):
             self.new_id_input.setValue(default_new_id)
         else:
             self.new_id_input.setValue(1)
-        layout.addRow("修改ID为:", self.new_id_input)
+        layout.addRow("Change ID To:", self.new_id_input)
 
         # 按钮
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -272,7 +272,7 @@ class IDChangeDialog(QDialog):
 
 
 class ServoWorker(QObject):
-    """单个舵机控制工作线程"""
+    """Single-servo control worker thread"""
     status_updated = Signal(list, bool, str)  # 舵机列表, 连接状态, 端口标识
     id_changed = Signal(int, int, bool, str, str)  # old_id, new_id, success, message, 端口标识
     log_message = Signal(str, str)  # 日志消息, 端口标识
@@ -315,23 +315,23 @@ class ServoWorker(QObject):
         self.rescan_requested = threading.Event()  # 手动重新扫描请求
 
     def request_rescan(self):
-        """请求立即重新扫描"""
+        """Request an immediate rescan"""
         self.rescan_requested.set()
         self.command_event.set()
-        self.log_message.emit("🔄 收到重新扫描请求", self.port_id)
+        self.log_message.emit("🔄 Rescan request received", self.port_id)
 
     def connect_servo(self) -> bool:
-        """连接舵机控制器"""
+        """Connect to the servo controller"""
         try:
             print(f"[DEBUG] {self.port_id}: Attempting to connect to {self.port_name}")
-            self.log_message.emit(f"正在连接舵机控制器: {self.port_name}", self.port_id)
+            self.log_message.emit(f"Connecting to servo controller: {self.port_name}", self.port_id)
 
             # 如果已有旧连接，先彻底关闭并释放（Windows 必须等句柄释放）
             if self.port_handler is not None:
                 try:
                     self.port_handler.closePort()
                 except Exception as e:
-                    print(f"[DEBUG] {self.port_id}: 关闭旧端口时异常: {e}")
+                    print(f"[DEBUG] {self.port_id}: exception closing old port: {e}")
                 self.port_handler = None
                 self.servo_handler = None
                 if os.name == 'nt':
@@ -341,61 +341,61 @@ class ServoWorker(QObject):
 
             if not self.port_handler.openPort():
                 print(f"[DEBUG] {self.port_id}: Failed to open port {self.port_name}")
-                self.log_message.emit(f"❌ 无法打开串口: {self.port_name}", self.port_id)
+                self.log_message.emit(f"❌ Can't open serial port: {self.port_name}", self.port_id)
                 return False
 
             if not self.port_handler.setBaudRate(self.baud_rate):
                 print(f"[DEBUG] {self.port_id}: Failed to set baud rate {self.baud_rate}")
-                self.log_message.emit(f"❌ 无法设置波特率: {self.baud_rate}", self.port_id)
+                self.log_message.emit(f"❌ Can't set baud rate: {self.baud_rate}", self.port_id)
                 self.port_handler.closePort()
                 return False
 
             self.servo_handler = sms_sts(self.port_handler)
             self.is_connected = True
             print(f"[DEBUG] {self.port_id}: Successfully connected to {self.port_name}")
-            self.log_message.emit("✅ 舵机控制器连接成功", self.port_id)
+            self.log_message.emit("✅ Servo controller connected successfully", self.port_id)
             return True
 
         except Exception as e:
             print(f"[DEBUG] {self.port_id}: Connection exception: {e}")
-            self.log_message.emit(f"❌ 连接失败: {e}", self.port_id)
+            self.log_message.emit(f"❌ Connection failed: {e}", self.port_id)
             return False
 
     def disconnect_servo(self):
-        """断开舵机连接"""
+        """Disconnect from the servo"""
         try:
             if self.port_handler:
                 self.port_handler.closePort()
         except Exception as e:
-            print(f"[DEBUG] {self.port_id}: 断开连接异常: {e}")
+            print(f"[DEBUG] {self.port_id}: exception disconnecting: {e}")
         finally:
             self.is_connected = False
             self.port_handler = None
             self.servo_handler = None
-            self.log_message.emit("🔌 舵机控制器已断开", self.port_id)
+            self.log_message.emit("🔌 Servo controller disconnected", self.port_id)
 
     def ping_servo(self, servo_id: int) -> bool:
-        """检测舵机是否存在"""
+        """Detect whether the servo is present"""
         try:
             model_number, result, error = self.servo_handler.ping(servo_id)
             if result == COMM_SUCCESS:
-                print(f"[DEBUG] {self.port_id}: 舵机 {servo_id} 型号: {model_number}")
+                print(f"[DEBUG] {self.port_id}: servo {servo_id} model: {model_number}")
                 return True
             else:
-                print(f"[DEBUG] {self.port_id}: Ping 舵机 {servo_id} 失败: result={result}, error={error}")
+                print(f"[DEBUG] {self.port_id}: Ping servo {servo_id} failed: result={result}, error={error}")
                 return False
         except Exception as e:
-            print(f"[DEBUG] {self.port_id}: Ping 舵机 {servo_id} 异常: {e}")
+            print(f"[DEBUG] {self.port_id}: Ping servo {servo_id} exception: {e}")
             return False
 
     def scan_servos(self) -> List[int]:
-        """扫描所有舵机"""
+        """Scan all servos"""
         if not self.is_connected:
             return []
 
         # 热插拔检测：在 POSIX 系统上检查端口设备文件是否仍然存在
         if os.name != 'nt' and not os.path.exists(self.port_name):
-            print(f"[DEBUG] {self.port_id}: 端口设备已消失: {self.port_name}")
+            print(f"[DEBUG] {self.port_id}: port device disappeared: {self.port_name}")
             self.is_connected = False
             try:
                 self.disconnect_servo()
@@ -411,15 +411,15 @@ class ServoWorker(QObject):
         return found_servos
 
     def change_servo_id(self, old_id: int, new_id: int) -> (bool, str):
-        """修改舵机ID（队列版本）"""
+        """Change servo ID (queued version)"""
         # 将请求加入队列
         self.queue_id_change(old_id, new_id)
-        return True, "ID修改请求已加入队列"
+        return True, "ID change request added to queue"
 
     def queue_id_change(self, old_id: int, new_id: int):
-        """将ID修改请求加入队列"""
-        print(f"[DEBUG] {self.port_id}: ID修改请求入队: {old_id} -> {new_id}")
-        self.log_message.emit(f"📝 ID修改请求已排队: {old_id} -> {new_id}", self.port_id)
+        """Add an ID change request to the queue"""
+        print(f"[DEBUG] {self.port_id}: ID change request queued: {old_id} -> {new_id}")
+        self.log_message.emit(f"📝 ID change request queued: {old_id} -> {new_id}", self.port_id)
         self.id_change_queue.put((old_id, new_id, time.time()))
 
         # 启动ID修改线程（如果还没启动）
@@ -427,16 +427,16 @@ class ServoWorker(QObject):
             self.start_id_change_processor()
 
     def start_id_change_processor(self):
-        """启动ID修改处理线程"""
+        """Start the ID-change processing thread"""
         if not self.id_change_running:
             self.id_change_running = True
             self.id_change_thread = threading.Thread(target=self.process_id_changes, daemon=True)
             self.id_change_thread.start()
-            print(f"[DEBUG] {self.port_id}: ID修改处理线程已启动")
+            print(f"[DEBUG] {self.port_id}: ID-change processing thread started")
 
     def process_id_changes(self):
-        """处理ID修改队列"""
-        print(f"[DEBUG] {self.port_id}: 开始处理ID修改队列")
+        """Process the ID-change queue"""
+        print(f"[DEBUG] {self.port_id}: starting to process ID-change queue")
         while self.id_change_running or not self.id_change_queue.empty():
             try:
                 if not self.id_change_queue.empty():
@@ -444,8 +444,8 @@ class ServoWorker(QObject):
 
                     # 暂停扫描，避免总线冲突
                     self.pause_scanning = True
-                    print(f"[DEBUG] {self.port_id}: 暂停扫描，准备执行ID修改: {old_id} -> {new_id}")
-                    self.log_message.emit(f"⏸️ 暂停扫描，执行ID修改: {old_id} -> {new_id}", self.port_id)
+                    print(f"[DEBUG] {self.port_id}: pausing scan, about to change ID: {old_id} -> {new_id}")
+                    self.log_message.emit(f"⏸️ Pausing scan, changing ID: {old_id} -> {new_id}", self.port_id)
 
                     # 等待一下确保扫描完全停止
                     time.sleep(0.5)
@@ -455,8 +455,8 @@ class ServoWorker(QObject):
 
                     # 恢复扫描
                     self.pause_scanning = False
-                    print(f"[DEBUG] {self.port_id}: 恢复扫描")
-                    self.log_message.emit(f"▶️ 恢复扫描", self.port_id)
+                    print(f"[DEBUG] {self.port_id}: resuming scan")
+                    self.log_message.emit(f"▶️ Resuming scan", self.port_id)
 
                     # 发送结果
                     self.id_changed.emit(old_id, new_id, success, message, self.port_id)
@@ -465,80 +465,80 @@ class ServoWorker(QObject):
                     time.sleep(0.1)  # 短暂休眠避免CPU占用
 
             except Exception as e:
-                print(f"[DEBUG] {self.port_id}: ID修改处理异常: {e}")
-                self.log_message.emit(f"❌ ID修改处理异常: {e}", self.port_id)
+                print(f"[DEBUG] {self.port_id}: exception processing ID change: {e}")
+                self.log_message.emit(f"❌ Exception processing ID change: {e}", self.port_id)
                 # 确保扫描被恢复
                 self.pause_scanning = False
 
-        print(f"[DEBUG] {self.port_id}: ID修改处理线程结束")
+        print(f"[DEBUG] {self.port_id}: ID-change processing thread ended")
         self.id_change_running = False
         self.pause_scanning = False
 
     def execute_id_change(self, old_id: int, new_id: int) -> (bool, str):
-        """执行实际的ID修改操作"""
+        """Perform the actual ID-change operation"""
         try:
             if not self.is_connected:
-                return False, "未连接舵机控制器"
+                return False, "Servo controller not connected"
 
-            self.log_message.emit(f"🔧 执行SMS_STS ID修改: {old_id} -> {new_id}", self.port_id)
-            print(f"[DEBUG] {self.port_id}: 执行ID修改: {old_id} -> {new_id}")
+            self.log_message.emit(f"🔧 Performing SMS_STS ID change: {old_id} -> {new_id}", self.port_id)
+            print(f"[DEBUG] {self.port_id}: performing ID change: {old_id} -> {new_id}")
 
             # 首先读取舵机信息（此时扫描已暂停，不会冲突）
             try:
                 model_number, result, error = self.servo_handler.ping(old_id)
                 if result == COMM_SUCCESS:
-                    print(f"[DEBUG] {self.port_id}: SMS_STS 舵机型号: {model_number}")
-                    self.log_message.emit(f"📋 舵机型号: {model_number}", self.port_id)
+                    print(f"[DEBUG] {self.port_id}: SMS_STS servo model: {model_number}")
+                    self.log_message.emit(f"📋 Servo model: {model_number}", self.port_id)
                 else:
-                    print(f"[DEBUG] {self.port_id}: 无法读取舵机信息: {error}")
-                    return False, f"无法读取舵机信息: {error}"
+                    print(f"[DEBUG] {self.port_id}: can't read servo info: {error}")
+                    return False, f"Can't read servo info: {error}"
             except Exception as e:
-                return False, f"读取舵机信息异常: {e}"
+                return False, f"Exception reading servo info: {e}"
 
             # SMS_STS EEPROM解锁流程
-            print(f"[DEBUG] {self.port_id}: SMS_STS 解锁EEPROM...")
+            print(f"[DEBUG] {self.port_id}: SMS_STS unlocking EEPROM...")
             result, error = self.servo_handler.unLockEprom(old_id)
             if result != COMM_SUCCESS:
-                print(f"[DEBUG] {self.port_id}: EEPROM解锁失败: result={result}, error={error}")
-                return False, f"EEPROM解锁失败: {error}"
+                print(f"[DEBUG] {self.port_id}: EEPROM unlock failed: result={result}, error={error}")
+                return False, f"EEPROM unlock failed: {error}"
 
-            print(f"[DEBUG] {self.port_id}: EEPROM解锁成功")
+            print(f"[DEBUG] {self.port_id}: EEPROM unlocked successfully")
             time.sleep(0.1)
 
             # 修改ID (使用SMS_STS_ID地址)
-            print(f"[DEBUG] {self.port_id}: 写入新ID: {new_id}")
+            print(f"[DEBUG] {self.port_id}: writing new ID: {new_id}")
             result, error = self.servo_handler.write1ByteTxRx(old_id, 5, new_id)  # SMS_STS_ID = 5
             if result != COMM_SUCCESS:
-                print(f"[DEBUG] {self.port_id}: ID写入失败: result={result}, error={error}")
-                return False, f"ID写入失败: {error}"
+                print(f"[DEBUG] {self.port_id}: ID write failed: result={result}, error={error}")
+                return False, f"ID write failed: {error}"
 
-            print(f"[DEBUG] {self.port_id}: ID写入成功")
+            print(f"[DEBUG] {self.port_id}: ID written successfully")
             time.sleep(0.3)
 
             # 验证新ID（此时扫描仍暂停，ping不会冲突）
-            print(f"[DEBUG] {self.port_id}: 验证新ID: {new_id}")
+            print(f"[DEBUG] {self.port_id}: verifying new ID: {new_id}")
             if not self.ping_servo(new_id):
-                print(f"[DEBUG] {self.port_id}: 新ID验证失败")
-                return False, f"验证失败，无法ping通新ID: {new_id}"
+                print(f"[DEBUG] {self.port_id}: new ID verification failed")
+                return False, f"Verification failed, can't ping new ID: {new_id}"
 
-            print(f"[DEBUG] {self.port_id}: 新ID验证成功")
+            print(f"[DEBUG] {self.port_id}: new ID verified successfully")
 
             # 重新锁定EEPROM
-            print(f"[DEBUG] {self.port_id}: 重新锁定EEPROM...")
+            print(f"[DEBUG] {self.port_id}: re-locking EEPROM...")
             result, error = self.servo_handler.LockEprom(new_id)
             if result != COMM_SUCCESS:
-                print(f"[DEBUG] {self.port_id}: 重新锁定失败: {error}")
-                self.log_message.emit(f"⚠️ 重新锁定EEPROM失败: {error}", self.port_id)
+                print(f"[DEBUG] {self.port_id}: re-lock failed: {error}")
+                self.log_message.emit(f"⚠️ Failed to re-lock EEPROM: {error}", self.port_id)
             else:
-                print(f"[DEBUG] {self.port_id}: 重新锁定成功")
+                print(f"[DEBUG] {self.port_id}: re-locked successfully")
 
-            self.log_message.emit(f"✅ SMS_STS ID修改成功: {old_id} -> {new_id}", self.port_id)
-            print(f"[DEBUG] {self.port_id}: ID修改完成: {old_id} -> {new_id}")
+            self.log_message.emit(f"✅ SMS_STS ID change successful: {old_id} -> {new_id}", self.port_id)
+            print(f"[DEBUG] {self.port_id}: ID change complete: {old_id} -> {new_id}")
             return True, ""
 
         except Exception as e:
-            error_msg = f"修改ID异常: {e}"
-            print(f"[DEBUG] {self.port_id}: 修改ID异常: {e}")
+            error_msg = f"Exception changing ID: {e}"
+            print(f"[DEBUG] {self.port_id}: exception changing ID: {e}")
             self.log_message.emit(f"❌ {error_msg}", self.port_id)
             return False, error_msg
 
@@ -546,24 +546,24 @@ class ServoWorker(QObject):
     # 系统命令队列：寄存器读写、波特率修改、恢复出厂设置
     # ------------------------------------------------------------------
     def queue_system_command(self, command: dict):
-        """将系统命令加入队列"""
-        print(f"[DEBUG] {self.port_id}: 系统命令入队: {command}")
+        """Add a system command to the queue"""
+        print(f"[DEBUG] {self.port_id}: system command queued: {command}")
         self.system_command_queue.put(command)
-        self.log_message.emit(f"📝 {command.get('desc', '系统命令')} 已排队", self.port_id)
+        self.log_message.emit(f"📝 {command.get('desc', 'System command')} queued", self.port_id)
         if not self.system_command_running:
             self.start_system_command_processor()
 
     def start_system_command_processor(self):
-        """启动系统命令处理线程"""
+        """Start the system-command processing thread"""
         if not self.system_command_running:
             self.system_command_running = True
             self.system_command_thread = threading.Thread(target=self.process_system_commands, daemon=True)
             self.system_command_thread.start()
-            print(f"[DEBUG] {self.port_id}: 系统命令处理线程已启动")
+            print(f"[DEBUG] {self.port_id}: system-command processing thread started")
 
     def process_system_commands(self):
-        """处理系统命令队列"""
-        print(f"[DEBUG] {self.port_id}: 开始处理系统命令队列")
+        """Process the system-command queue"""
+        print(f"[DEBUG] {self.port_id}: starting to process system-command queue")
         while self.system_command_running or not self.system_command_queue.empty():
             try:
                 if not self.system_command_queue.empty():
@@ -572,11 +572,11 @@ class ServoWorker(QObject):
 
                     # 暂停扫描，避免总线冲突
                     self.pause_scanning = True
-                    self.log_message.emit(f"⏸️ 暂停扫描，执行: {command.get('desc', cmd_type)}", self.port_id)
+                    self.log_message.emit(f"⏸️ Pausing scan, running: {command.get('desc', cmd_type)}", self.port_id)
                     time.sleep(0.3)
 
                     success = False
-                    message = "未知命令"
+                    message = "Unknown command"
                     extra = None
 
                     try:
@@ -600,12 +600,12 @@ class ServoWorker(QObject):
                             success, message = self.execute_clear_angle_limits(command["servo_id"])
                     except Exception as e:
                         success = False
-                        message = f"执行异常: {e}"
-                        print(f"[DEBUG] {self.port_id}: 系统命令执行异常: {e}")
+                        message = f"Execution exception: {e}"
+                        print(f"[DEBUG] {self.port_id}: exception executing system command: {e}")
 
                     # 恢复扫描
                     self.pause_scanning = False
-                    self.log_message.emit(f"▶️ 恢复扫描", self.port_id)
+                    self.log_message.emit(f"▶️ Resuming scan", self.port_id)
 
                     # 发送结果
                     if cmd_type == "register_read" and extra is not None:
@@ -620,20 +620,20 @@ class ServoWorker(QObject):
                     time.sleep(0.1)
 
             except Exception as e:
-                print(f"[DEBUG] {self.port_id}: 系统命令处理异常: {e}")
-                self.log_message.emit(f"❌ 系统命令处理异常: {e}", self.port_id)
+                print(f"[DEBUG] {self.port_id}: exception processing system command: {e}")
+                self.log_message.emit(f"❌ Exception processing system command: {e}", self.port_id)
                 self.pause_scanning = False
 
-        print(f"[DEBUG] {self.port_id}: 系统命令处理线程结束")
+        print(f"[DEBUG] {self.port_id}: system-command processing thread ended")
         self.system_command_running = False
         self.pause_scanning = False
 
     def execute_register_read(self, servo_id: int, address: int, length: int) -> (bool, str, int):
-        """执行寄存器读取"""
+        """Perform a register read"""
         if not self.is_connected:
-            return False, "未连接舵机控制器", None
+            return False, "Servo controller not connected", None
 
-        self.log_message.emit(f"🔍 读取 ID{servo_id} 寄存器 0x{address:02X} ({length}字节)", self.port_id)
+        self.log_message.emit(f"🔍 Reading ID{servo_id} register 0x{address:02X} ({length} bytes)", self.port_id)
         try:
             if length == 1:
                 value, result, error = self.servo_handler.read1ByteTxRx(servo_id, address)
@@ -642,22 +642,22 @@ class ServoWorker(QObject):
             elif length == 4:
                 value, result, error = self.servo_handler.read4ByteTxRx(servo_id, address)
             else:
-                return False, "不支持的长度（仅支持1/2/4字节）", None
+                return False, "Unsupported length (only 1/2/4 bytes supported)", None
 
             if result == COMM_SUCCESS:
-                self.log_message.emit(f"✅ ID{servo_id} 寄存器 0x{address:02X} = {value} (0x{value:X})", self.port_id)
-                return True, "读取成功", value
+                self.log_message.emit(f"✅ ID{servo_id} register 0x{address:02X} = {value} (0x{value:X})", self.port_id)
+                return True, "Read successful", value
             else:
-                return False, f"读取失败: result={result}, error={error}", None
+                return False, f"Read failed: result={result}, error={error}", None
         except Exception as e:
-            return False, f"读取异常: {e}", None
+            return False, f"Read exception: {e}", None
 
     def execute_register_write(self, servo_id: int, address: int, length: int, value: int) -> (bool, str):
-        """执行寄存器写入"""
+        """Perform a register write"""
         if not self.is_connected:
-            return False, "未连接舵机控制器"
+            return False, "Servo controller not connected"
 
-        self.log_message.emit(f"✏️ 写入 ID{servo_id} 寄存器 0x{address:02X} = {value} ({length}字节)", self.port_id)
+        self.log_message.emit(f"✏️ Writing ID{servo_id} register 0x{address:02X} = {value} ({length} bytes)", self.port_id)
         try:
             if length == 1:
                 result, error = self.servo_handler.write1ByteTxRx(servo_id, address, value)
@@ -666,20 +666,20 @@ class ServoWorker(QObject):
             elif length == 4:
                 result, error = self.servo_handler.write4ByteTxRx(servo_id, address, value)
             else:
-                return False, "不支持的长度（仅支持1/2/4字节）"
+                return False, "Unsupported length (only 1/2/4 bytes supported)"
 
             if result == COMM_SUCCESS:
-                self.log_message.emit(f"✅ ID{servo_id} 寄存器 0x{address:02X} 写入成功", self.port_id)
-                return True, "写入成功"
+                self.log_message.emit(f"✅ ID{servo_id} register 0x{address:02X} written successfully", self.port_id)
+                return True, "Write successful"
             else:
-                return False, f"写入失败: result={result}, error={error}"
+                return False, f"Write failed: result={result}, error={error}"
         except Exception as e:
-            return False, f"写入异常: {e}"
+            return False, f"Write exception: {e}"
 
     def execute_baud_rate_change(self, servo_id: int, new_baud_rate: int) -> (bool, str):
-        """执行波特率修改"""
+        """Perform a baud rate change"""
         if not self.is_connected:
-            return False, "未连接舵机控制器"
+            return False, "Servo controller not connected"
 
         # 波特率值 -> 寄存器值映射
         baud_to_reg = {
@@ -695,87 +695,87 @@ class ServoWorker(QObject):
         reg_to_baud = {v: k for k, v in baud_to_reg.items()}
 
         if new_baud_rate not in baud_to_reg:
-            return False, f"不支持的波特率: {new_baud_rate}"
+            return False, f"Unsupported baud rate: {new_baud_rate}"
 
         reg_value = baud_to_reg[new_baud_rate]
         old_baud_rate = self.baud_rate
 
         self.log_message.emit(
-            f"🔧 修改 ID{servo_id} 波特率: {old_baud_rate} -> {new_baud_rate}", self.port_id
+            f"🔧 Changing ID{servo_id} baud rate: {old_baud_rate} -> {new_baud_rate}", self.port_id
         )
 
         try:
             # 解锁 EEPROM
             result, error = self.servo_handler.unLockEprom(servo_id)
             if result != COMM_SUCCESS:
-                return False, f"EEPROM解锁失败: {error}"
+                return False, f"EEPROM unlock failed: {error}"
 
             # 写入新波特率（地址 6）
             result, error = self.servo_handler.write1ByteTxRx(servo_id, 6, reg_value)
             if result != COMM_SUCCESS:
                 self.servo_handler.LockEprom(servo_id)
-                return False, f"波特率写入失败: {error}"
+                return False, f"Baud rate write failed: {error}"
 
             # 锁定 EEPROM
             self.servo_handler.LockEprom(servo_id)
             time.sleep(0.2)
 
             # 尝试切换到新波特率
-            self.log_message.emit(f"🔄 串口切换到 {new_baud_rate} bps...", self.port_id)
+            self.log_message.emit(f"🔄 Switching serial port to {new_baud_rate} bps...", self.port_id)
             self.port_handler.setBaudRate(new_baud_rate)
             self.baud_rate = new_baud_rate
             time.sleep(0.3)
 
             # 验证通信
             if self.ping_servo(servo_id):
-                self.log_message.emit(f"✅ 波特率修改成功，当前 {new_baud_rate} bps", self.port_id)
-                return True, f"波特率已修改为 {new_baud_rate} bps"
+                self.log_message.emit(f"✅ Baud rate changed successfully, now {new_baud_rate} bps", self.port_id)
+                return True, f"Baud rate changed to {new_baud_rate} bps"
             else:
                 # 切换失败，尝试恢复旧波特率
-                self.log_message.emit(f"⚠️ 新波特率验证失败，尝试恢复 {old_baud_rate} bps", self.port_id)
+                self.log_message.emit(f"⚠️ New baud rate verification failed, trying to restore {old_baud_rate} bps", self.port_id)
                 self.port_handler.setBaudRate(old_baud_rate)
                 self.baud_rate = old_baud_rate
                 time.sleep(0.3)
                 if self.ping_servo(servo_id):
-                    return False, f"新波特率验证失败，已恢复 {old_baud_rate} bps"
+                    return False, f"New baud rate verification failed, restored to {old_baud_rate} bps"
                 else:
-                    return False, f"严重：波特率修改失败且旧波特率也丢失了，请重新连接"
+                    return False, f"Critical: baud rate change failed and the old baud rate was also lost, please reconnect"
 
         except Exception as e:
-            return False, f"波特率修改异常: {e}"
+            return False, f"Exception changing baud rate: {e}"
 
     def execute_factory_reset(self, servo_id: int) -> (bool, str):
-        """执行恢复出厂设置"""
+        """Perform a factory reset"""
         if not self.is_connected:
-            return False, "未连接舵机控制器"
+            return False, "Servo controller not connected"
 
-        self.log_message.emit(f"🔄 恢复 ID{servo_id} 出厂设置...", self.port_id)
+        self.log_message.emit(f"🔄 Restoring ID{servo_id} factory settings...", self.port_id)
         try:
             result, error = self.servo_handler.reSet(servo_id)
             if result == COMM_SUCCESS:
                 self.log_message.emit(
-                    f"✅ ID{servo_id} 已恢复出厂设置（ID 将变回 1，波特率变回 1000000）",
+                    f"✅ ID{servo_id} restored to factory settings (ID will revert to 1, baud rate to 1000000)",
                     self.port_id
                 )
-                return True, "恢复出厂设置成功，请重新扫描（舵机ID已变为1）"
+                return True, "Factory reset successful, please rescan (servo ID is now 1)"
             else:
-                return False, f"恢复出厂设置失败: result={result}, error={error}"
+                return False, f"Factory reset failed: result={result}, error={error}"
         except Exception as e:
-            return False, f"恢复出厂设置异常: {e}"
+            return False, f"Exception during factory reset: {e}"
 
     def execute_set_middle_calibration(self, servo_id: int) -> (bool, str):
-        """将当前位置设为指定舵机的中位值（2048）"""
+        """Set the given servo's current position as its mid-point value (2048)"""
         if not self.is_connected:
-            return False, "未连接舵机控制器"
+            return False, "Servo controller not connected"
         if servo_id not in self.current_servos:
-            return False, f"ID{servo_id} 已离线，无法设置中位"
+            return False, f"ID{servo_id} is offline, can't set mid-point"
 
-        self.log_message.emit(f"🔧 设置 ID{servo_id} 中位校准...", self.port_id)
+        self.log_message.emit(f"🔧 Setting ID{servo_id} mid-point calibration...", self.port_id)
         try:
             # 解锁 EEPROM
             result, error = self.servo_handler.unLockEprom(servo_id)
             if result != COMM_SUCCESS:
-                return False, f"EEPROM解锁失败: {error}"
+                return False, f"EEPROM unlock failed: {error}"
             time.sleep(0.1)
 
             # 发送中位校准命令：写 128 到地址 40
@@ -784,31 +784,31 @@ class ServoWorker(QObject):
             )
             if result != COMM_SUCCESS:
                 self.servo_handler.LockEprom(servo_id)
-                return False, f"中位校准命令失败: {error}"
+                return False, f"Mid-point calibration command failed: {error}"
             time.sleep(0.1)
 
             # 重新锁定 EEPROM
             result, error = self.servo_handler.LockEprom(servo_id)
             if result != COMM_SUCCESS:
-                self.log_message.emit(f"⚠️ ID{servo_id} EEPROM重新锁定失败: {error}", self.port_id)
+                self.log_message.emit(f"⚠️ ID{servo_id} failed to re-lock EEPROM: {error}", self.port_id)
 
-            return True, f"ID{servo_id} 中位校准成功（当前位置已设为 2048）"
+            return True, f"ID{servo_id} mid-point calibration successful (current position set to 2048)"
         except Exception as e:
-            return False, f"中位校准异常: {e}"
+            return False, f"Exception during mid-point calibration: {e}"
 
     def execute_clear_angle_limits(self, servo_id: int) -> (bool, str):
-        """清除指定舵机的最小/最大角度限制（恢复为 0 ~ 4095）"""
+        """Clear the given servo's min/max angle limits (restore to 0~4095)"""
         if not self.is_connected:
-            return False, "未连接舵机控制器"
+            return False, "Servo controller not connected"
         if servo_id not in self.current_servos:
-            return False, f"ID{servo_id} 已离线，无法清除角度限制"
+            return False, f"ID{servo_id} is offline, can't clear angle limits"
 
-        self.log_message.emit(f"🧹 清除 ID{servo_id} 角度限制...", self.port_id)
+        self.log_message.emit(f"🧹 Clearing ID{servo_id} angle limits...", self.port_id)
         try:
             # 解锁 EEPROM
             result, error = self.servo_handler.unLockEprom(servo_id)
             if result != COMM_SUCCESS:
-                return False, f"EEPROM解锁失败: {error}"
+                return False, f"EEPROM unlock failed: {error}"
             time.sleep(0.1)
 
             # 写入最小角度限制为 0
@@ -817,7 +817,7 @@ class ServoWorker(QObject):
             )
             if result != COMM_SUCCESS:
                 self.servo_handler.LockEprom(servo_id)
-                return False, f"清除最小角度限制失败: {error}"
+                return False, f"Failed to clear min angle limit: {error}"
             time.sleep(0.05)
 
             # 写入最大角度限制为 4095
@@ -826,30 +826,30 @@ class ServoWorker(QObject):
             )
             if result != COMM_SUCCESS:
                 self.servo_handler.LockEprom(servo_id)
-                return False, f"清除最大角度限制失败: {error}"
+                return False, f"Failed to clear max angle limit: {error}"
             time.sleep(0.05)
 
             # 重新锁定 EEPROM
             result, error = self.servo_handler.LockEprom(servo_id)
             if result != COMM_SUCCESS:
-                self.log_message.emit(f"⚠️ ID{servo_id} EEPROM重新锁定失败: {error}", self.port_id)
+                self.log_message.emit(f"⚠️ ID{servo_id} failed to re-lock EEPROM: {error}", self.port_id)
 
-            return True, f"ID{servo_id} 角度限制已清除（MIN=0, MAX=4095）"
+            return True, f"ID{servo_id} angle limits cleared (MIN=0, MAX=4095)"
         except Exception as e:
-            return False, f"清除角度限制异常: {e}"
+            return False, f"Exception clearing angle limits: {e}"
 
     def set_servo_torque(self, servo_id: int, enable: bool):
-        """设置单个舵机力矩（加入队列，由扫描线程串行执行）"""
+        """Set a single servo's torque (queued, executed serially by the scan thread)"""
         self.torque_queue.put((servo_id, enable))
         self.command_event.set()
 
     def set_servo_position(self, servo_id: int, position: int):
-        """设置单个舵机目标位置（加入队列，由扫描线程串行执行）"""
+        """Set a single servo's target position (queued, executed serially by the scan thread)"""
         self.position_queue.put((servo_id, position))
         self.command_event.set()
 
     def _process_commands(self):
-        """处理力矩和位置控制命令"""
+        """Process torque and position control commands"""
         if self.servo_handler is None or not self.is_connected:
             # 清空队列，避免积压
             while not self.torque_queue.empty():
@@ -872,12 +872,12 @@ class ServoWorker(QObject):
                 result, error = self.servo_handler.write1ByteTxRx(servo_id, 40, value)
                 if result == COMM_SUCCESS:
                     self.log_message.emit(
-                        f"{'⚡' if enable else '⏹️'} ID{servo_id} 力矩{'开启' if enable else '关闭'}", self.port_id
+                        f"{'⚡' if enable else '⏹️'} ID{servo_id} torque {'On' if enable else 'Off'}", self.port_id
                     )
                 else:
-                    self.log_message.emit(f"❌ ID{servo_id} 力矩设置失败", self.port_id)
+                    self.log_message.emit(f"❌ ID{servo_id} torque setting failed", self.port_id)
             except Exception as e:
-                self.log_message.emit(f"❌ 力矩命令异常: {e}", self.port_id)
+                self.log_message.emit(f"❌ Torque command exception: {e}", self.port_id)
 
         # 处理位置命令
         while not self.position_queue.empty():
@@ -889,12 +889,12 @@ class ServoWorker(QObject):
                 if result == COMM_SUCCESS:
                     self.log_message.emit(f"🎯 ID{servo_id} -> {position}", self.port_id)
                 else:
-                    self.log_message.emit(f"❌ ID{servo_id} 位置写入失败", self.port_id)
+                    self.log_message.emit(f"❌ ID{servo_id} position write failed", self.port_id)
             except Exception as e:
-                self.log_message.emit(f"❌ 位置命令异常: {e}", self.port_id)
+                self.log_message.emit(f"❌ Position command exception: {e}", self.port_id)
 
     def _read_servo_info(self) -> dict:
-        """读取当前在线舵机的完整状态信息"""
+        """Read full status info for all servos currently online"""
         info = {}
         if self.servo_handler is None or not self.is_connected:
             return info
@@ -958,7 +958,7 @@ class ServoWorker(QObject):
         return info
 
     def _parse_servo_status(self, status: int) -> dict:
-        """解析舵机状态寄存器中的保护标志"""
+        """Parse the protection flags in the servo status register"""
         return {
             "overload": bool(status & ERRBIT_OVERLOAD),
             "over_current": bool(status & ERRBIT_OVERELE),
@@ -967,7 +967,7 @@ class ServoWorker(QObject):
         }
 
     def _read_positions(self) -> dict:
-        """读取当前在线舵机的位置（兼容旧信号）"""
+        """Read current position of online servos (legacy-signal compatible)"""
         positions = {}
         info = self._read_servo_info()
         for servo_id, servo_info in info.items():
@@ -976,7 +976,7 @@ class ServoWorker(QObject):
         return positions
 
     def run_scanner(self):
-        """运行扫描循环"""
+        """Run the scan loop"""
         scan_count = 0
         self.running = True
         consecutive_failures = 0
@@ -984,7 +984,7 @@ class ServoWorker(QObject):
         max_failures = 3
         max_empty_scans = 5  # 连续空扫描阈值，超过则强制重新连接（处理热插拔）
 
-        self.log_message.emit("🚀 扫描线程启动", self.port_id)
+        self.log_message.emit("🚀 Scan thread started", self.port_id)
         print(f"[DEBUG] {self.port_id}: Scanner thread started")
 
         # 首次连接
@@ -1005,7 +1005,7 @@ class ServoWorker(QObject):
                 # 如果未连接，尝试重新连接
                 if not self.is_connected:
                     if consecutive_failures < max_failures:
-                        self.log_message.emit(f"🔄 尝试重新连接... (第{consecutive_failures + 1}次)", self.port_id)
+                        self.log_message.emit(f"🔄 Trying to reconnect... (attempt {consecutive_failures + 1})", self.port_id)
                         time.sleep(2)  # 等待2秒再重试
                         # stop() 期间禁止重连，否则会重新打开串口导致端口泄漏
                         if not self.running:
@@ -1017,7 +1017,7 @@ class ServoWorker(QObject):
                         continue
                     else:
                         # 失败次数过多，延长等待时间
-                        self.log_message.emit(f"⚠️ 连续失败{max_failures}次，等待10秒后重试...", self.port_id)
+                        self.log_message.emit(f"⚠️ Failed {max_failures} times in a row, retrying in 10s...", self.port_id)
                         time.sleep(10)
                         consecutive_failures = 0  # 重置计数
                         if not self.running:
@@ -1026,7 +1026,7 @@ class ServoWorker(QObject):
 
                 # 检查是否暂停扫描（ID修改期间）
                 if self.pause_scanning:
-                    print(f"[DEBUG] {self.port_id}: 扫描已暂停（ID修改中）")
+                    print(f"[DEBUG] {self.port_id}: scan paused (ID change in progress)")
                     time.sleep(0.5)  # 短暂休眠，减少CPU占用
                     continue
 
@@ -1034,7 +1034,7 @@ class ServoWorker(QObject):
                 is_rescan = self.rescan_requested.is_set()
                 if is_rescan:
                     self.rescan_requested.clear()
-                    self.log_message.emit("🔄 执行手动重新扫描...", self.port_id)
+                    self.log_message.emit("🔄 Running manual rescan...", self.port_id)
 
                 # 扫描舵机
                 new_servos = self.scan_servos()
@@ -1050,7 +1050,7 @@ class ServoWorker(QObject):
                     consecutive_empty_scans += 1
                     if consecutive_empty_scans >= max_empty_scans:
                         self.log_message.emit(
-                            f"⚠️ 连续 {max_empty_scans} 次未扫描到舵机，判断为串口已断开，尝试重新连接...",
+                            f"⚠️ No servos found for {max_empty_scans} scans in a row, assuming the port disconnected, trying to reconnect...",
                             self.port_id
                         )
                         self.is_connected = False
@@ -1070,19 +1070,19 @@ class ServoWorker(QObject):
 
                     if new_servos:
                         if not old_servos:
-                            self.log_message.emit(f"📡 发现舵机: {new_servos}", self.port_id)
+                            self.log_message.emit(f"📡 Found servos: {new_servos}", self.port_id)
                         else:
                             added = set(new_servos) - set(old_servos)
                             removed = set(old_servos) - set(new_servos)
                             changes = []
                             if added:
-                                changes.append(f"新增: {list(added)}")
+                                changes.append(f"Added: {list(added)}")
                             if removed:
-                                changes.append(f"移除: {list(removed)}")
-                            self.log_message.emit(f"📡 舵机变化: {', '.join(changes)}", self.port_id)
+                                changes.append(f"Removed: {list(removed)}")
+                            self.log_message.emit(f"📡 Servo change: {', '.join(changes)}", self.port_id)
                     else:
                         if old_servos:
-                            self.log_message.emit("📡 所有舵机已断开", self.port_id)
+                            self.log_message.emit("📡 All servos disconnected", self.port_id)
 
                     print(f"[DEBUG] {self.port_id}: Emitting status_updated: servos={new_servos}, connected={self.is_connected}")
                     self.status_updated.emit(self.current_servos, self.is_connected, self.port_id)
@@ -1104,17 +1104,17 @@ class ServoWorker(QObject):
                 # 每30次扫描显示一次状态（减少日志频率）
                 if scan_count % 30 == 0:
                     if self.current_servos:
-                        self.log_message.emit(f"📊 当前舵机ID: {self.current_servos}", self.port_id)
+                        self.log_message.emit(f"📊 Current servo IDs: {self.current_servos}", self.port_id)
                     else:
-                        self.log_message.emit("📊 当前无舵机", self.port_id)
+                        self.log_message.emit("📊 No servos currently", self.port_id)
 
             except Exception as e:
                 consecutive_failures += 1
-                self.log_message.emit(f"❌ 扫描异常: {e} (失败次数: {consecutive_failures})", self.port_id)
+                self.log_message.emit(f"❌ Scan exception: {e} (failure count: {consecutive_failures})", self.port_id)
                 # 连续异常达到阈值时，强制重新打开串口（处理底层 serial 异常未重置 is_connected 的情况）
                 if consecutive_failures >= max_failures:
                     self.log_message.emit(
-                        f"⚠️ 连续扫描异常 {max_failures} 次，强制重新连接串口...", self.port_id
+                        f"⚠️ Scan exception {max_failures} times in a row, forcing serial port reconnect...", self.port_id
                     )
                     self.is_connected = False
                     try:
@@ -1126,7 +1126,7 @@ class ServoWorker(QObject):
                 time.sleep(1)
 
     def start(self):
-        """启动工作线程"""
+        """Start the worker thread"""
         # 旧扫描线程尚未退出时不重复创建，避免两个线程并发操作同一串口
         if self._scanner_thread and self._scanner_thread.is_alive():
             self.running = True  # 让旧线程继续循环
@@ -1136,7 +1136,7 @@ class ServoWorker(QObject):
         self._scanner_thread.start()
 
     def stop(self):
-        """停止工作线程"""
+        """Stop the worker thread"""
         self.running = False
         self.id_change_running = False
         self.system_command_running = False
@@ -1162,9 +1162,9 @@ class ServoWorker(QObject):
 
 
 class ServoPanel(QWidget):
-    """单个舵机控制面板"""
+    """Single-servo control panel"""
 
-    DISABLED_PORT = "-- 禁用 --"
+    DISABLED_PORT = "-- Disabled --"
 
     def __init__(self, port_name: str, port_id: str):
         super().__init__()
@@ -1177,16 +1177,16 @@ class ServoPanel(QWidget):
             self.init_connections()
             self.worker.start()
         else:
-            self.title_label.setText(f"🏭 {self.DISABLED_PORT} - 舵机标定")
-            self.connection_status.setText("⚫ 已禁用")
+            self.title_label.setText(f"🏭 {self.DISABLED_PORT} - Servo Calibration")
+            self.connection_status.setText("⚫ Disabled")
 
     def init_ui(self):
-        """初始化界面"""
+        """Initialize the UI"""
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
         # 标题
-        self.title_label = QLabel(f"🏭 {self.port_name} - 舵机标定")
+        self.title_label = QLabel(f"🏭 {self.port_name} - Servo Calibration")
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; margin: 5px;")
         layout.addWidget(self.title_label)
@@ -1259,27 +1259,27 @@ class ServoPanel(QWidget):
         self.setObjectName(self.port_id)
 
     def create_status_panel(self, layout):
-        """创建状态面板"""
-        status_group = QGroupBox("📡 系统状态")
+        """Create the status panel"""
+        status_group = QGroupBox("📡 System Status")
         status_layout = QHBoxLayout()
         status_group.setLayout(status_layout)
 
         # 连接状态
-        self.connection_status = QLabel("🔴 未连接")
+        self.connection_status = QLabel("🔴 Not Connected")
         self.connection_status.setStyleSheet("font-size: 12px; font-weight: bold;")
         status_layout.addWidget(self.connection_status)
 
         status_layout.addStretch()
 
         # 当前舵机
-        self.current_servos_label = QLabel("当前舵机: 扫描中...")
+        self.current_servos_label = QLabel("Current servos: scanning...")
         self.current_servos_label.setStyleSheet("font-size: 12px;")
         status_layout.addWidget(self.current_servos_label)
 
         status_layout.addSpacing(15)
 
         # 重新扫描按钮
-        self.rescan_btn = QPushButton("🔄 重新扫描")
+        self.rescan_btn = QPushButton("🔄 Rescan")
         self.rescan_btn.setStyleSheet("""
             QPushButton {
                 background-color: #17a2b8;
@@ -1300,15 +1300,15 @@ class ServoPanel(QWidget):
                 background-color: #6c757d;
             }
         """)
-        self.rescan_btn.setToolTip("立即重新扫描舵机")
+        self.rescan_btn.setToolTip("Rescan servos immediately")
         self.rescan_btn.clicked.connect(self.request_rescan)
         status_layout.addWidget(self.rescan_btn)
 
         layout.addWidget(status_group)
 
     def create_servo_panel(self, layout):
-        """创建舵机状态面板"""
-        servo_group = QGroupBox("📡 舵机状态")
+        """Create the servo status panel"""
+        servo_group = QGroupBox("📡 Servo Status")
         servo_layout = QVBoxLayout()
         servo_group.setLayout(servo_layout)
 
@@ -1318,28 +1318,28 @@ class ServoPanel(QWidget):
 
         # 左侧：发现的舵机
         found_layout = QVBoxLayout()
-        found_label = QLabel("✅ 发现的舵机")
+        found_label = QLabel("✅ Servos Found")
         found_label.setStyleSheet("font-weight: bold; color: #28a745; font-size: 12px;")
         found_layout.addWidget(found_label)
 
         self.servo_list_found = QTextEdit()
         self.servo_list_found.setReadOnly(True)
         self.servo_list_found.setMaximumHeight(150)
-        self.servo_list_found.setPlainText("正在扫描舵机...")
+        self.servo_list_found.setPlainText("Scanning servos...")
         found_layout.addWidget(self.servo_list_found)
 
         lists_layout.addLayout(found_layout)
 
         # 右侧：未识别ID
         missing_layout = QVBoxLayout()
-        missing_label = QLabel("⚠️ 未识别ID")
+        missing_label = QLabel("⚠️ Unrecognized ID")
         missing_label.setStyleSheet("font-weight: bold; color: #dc3545; font-size: 12px;")
         missing_layout.addWidget(missing_label)
 
         self.servo_list_missing = QTextEdit()
         self.servo_list_missing.setReadOnly(True)
         self.servo_list_missing.setMaximumHeight(150)
-        self.servo_list_missing.setPlainText("正在扫描舵机...")
+        self.servo_list_missing.setPlainText("Scanning servos...")
         missing_layout.addWidget(self.servo_list_missing)
 
         lists_layout.addLayout(missing_layout)
@@ -1348,13 +1348,13 @@ class ServoPanel(QWidget):
         layout.addWidget(servo_group)
 
     def create_calibration_panel(self, layout):
-        """创建标定面板"""
-        calibration_group = QGroupBox("🎯 ID标定")
+        """Create the calibration panel"""
+        calibration_group = QGroupBox("🎯 ID Calibration")
         calibration_layout = QVBoxLayout()
         calibration_group.setLayout(calibration_layout)
 
         # 说明文字
-        info_label = QLabel("📋 点击目标ID执行修改\n⏸️ 自动暂停扫描确保成功")
+        info_label = QLabel("📋 Click a target ID to change it\n⏸️ Scanning pauses automatically to ensure success")
         info_label.setStyleSheet("background-color: #e3f2fd; border: 1px solid #bbdefb; padding: 8px; border-radius: 4px; color: #1565c0; font-size: 11px;")
         calibration_layout.addWidget(info_label)
 
@@ -1380,20 +1380,20 @@ class ServoPanel(QWidget):
         layout.addWidget(calibration_group)
 
     def create_servo_control_widget(self):
-        """创建单舵机滑动条控制面板，返回一个可复用的 QWidget"""
+        """Create the single-servo slider control panel; returns a reusable QWidget"""
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setSpacing(10)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        control_group = QGroupBox(f"🎚️ 单舵机控制 - {self.port_name}")
+        control_group = QGroupBox(f"🎚️ Single Servo Control - {self.port_name}")
         control_layout = QVBoxLayout()
         control_group.setLayout(control_layout)
 
         # 全局力矩按钮
         global_btn_layout = QHBoxLayout()
 
-        self.enable_all_torque_btn = QPushButton("⚡ 开启所有力矩")
+        self.enable_all_torque_btn = QPushButton("⚡ Enable All Torque")
         self.enable_all_torque_btn.setStyleSheet("""
             QPushButton {
                 background-color: #28a745;
@@ -1410,7 +1410,7 @@ class ServoPanel(QWidget):
         self.enable_all_torque_btn.clicked.connect(self.enable_all_torque)
         global_btn_layout.addWidget(self.enable_all_torque_btn)
 
-        self.disable_all_torque_btn = QPushButton("⏹️ 关闭所有力矩")
+        self.disable_all_torque_btn = QPushButton("⏹️ Disable All Torque")
         self.disable_all_torque_btn.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545;
@@ -1508,7 +1508,7 @@ class ServoPanel(QWidget):
             self.servo_target_labels[servo_id] = target_label
             row_layout.addWidget(target_label)
 
-            torque_btn = QPushButton("⚡ 力矩")
+            torque_btn = QPushButton("⚡ Torque")
             torque_btn.setCheckable(True)
             torque_btn.setChecked(False)
             torque_btn.setEnabled(False)
@@ -1537,7 +1537,7 @@ class ServoPanel(QWidget):
             row_layout.addWidget(torque_btn)
 
             # 中位校准按钮（单独设置该舵机中位值）
-            middle_btn = QPushButton("🎯 中位")
+            middle_btn = QPushButton("🎯 Mid-Pos")
             middle_btn.setEnabled(False)
             middle_btn.setStyleSheet("""
                 QPushButton {
@@ -1553,13 +1553,13 @@ class ServoPanel(QWidget):
                 QPushButton:pressed { background-color: #c95d08; }
                 QPushButton:disabled { background-color: #6c757d; }
             """)
-            middle_btn.setToolTip("将当前位置设为该舵机的中位值（2048）")
+            middle_btn.setToolTip("Set this servo's current position as its mid-point value (2048)")
             middle_btn.clicked.connect(lambda checked, sid=servo_id: self.on_set_middle_clicked(sid))
             self.servo_middle_btns[servo_id] = middle_btn
             row_layout.addWidget(middle_btn)
 
             # 清除角度限制按钮
-            clear_limit_btn = QPushButton("🧹 清限位")
+            clear_limit_btn = QPushButton("🧹 Clear Limits")
             clear_limit_btn.setEnabled(False)
             clear_limit_btn.setStyleSheet("""
                 QPushButton {
@@ -1575,7 +1575,7 @@ class ServoPanel(QWidget):
                 QPushButton:pressed { background-color: #4a2785; }
                 QPushButton:disabled { background-color: #6c757d; }
             """)
-            clear_limit_btn.setToolTip("清除该舵机的最小/最大角度限制（恢复 0~4095）")
+            clear_limit_btn.setToolTip("Clear this servo's min/max angle limits (restore to 0~4095)")
             clear_limit_btn.clicked.connect(lambda checked, sid=servo_id: self.on_clear_limits_clicked(sid))
             self.servo_clear_limit_btns[servo_id] = clear_limit_btn
             row_layout.addWidget(clear_limit_btn)
@@ -1624,7 +1624,7 @@ class ServoPanel(QWidget):
 
         # 提示文字
         tip_label = QLabel(
-            "💡 拖动滑块并松开后，舵机将移动到目标位置。未识别到的舵机无法操作。"
+            "💡 Drag the slider and release to move the servo to the target position. Unrecognized servos can't be controlled."
         )
         tip_label.setStyleSheet(
             "background-color: #fff3cd; border: 1px solid #ffeeba; padding: 6px; "
@@ -1637,8 +1637,8 @@ class ServoPanel(QWidget):
         return container
 
     def create_log_panel(self, layout):
-        """创建日志面板"""
-        log_group = QGroupBox("📋 操作日志")
+        """Create the log panel"""
+        log_group = QGroupBox("📋 Operation Log")
         log_layout = QVBoxLayout()
         log_group.setLayout(log_layout)
 
@@ -1646,11 +1646,11 @@ class ServoPanel(QWidget):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumHeight(120)
-        self.log_text.setPlainText("系统启动...")
+        self.log_text.setPlainText("System starting...")
         log_layout.addWidget(self.log_text)
 
         # 清空日志按钮
-        clear_btn = QPushButton("清空日志")
+        clear_btn = QPushButton("Clear Log")
         clear_btn.setMaximumWidth(80)
         clear_btn.setStyleSheet("font-size: 11px;")
         clear_btn.clicked.connect(self.log_text.clear)
@@ -1659,7 +1659,7 @@ class ServoPanel(QWidget):
         layout.addWidget(log_group)
 
     def init_connections(self):
-        """初始化信号连接"""
+        """Initialize signal connections"""
         if self.worker is None:
             return
         self.worker.status_updated.connect(self.update_status)
@@ -1670,32 +1670,32 @@ class ServoPanel(QWidget):
         self.worker.system_command_result.connect(self.on_system_command_result)
 
         # 添加初始连接日志
-        self.add_log("🔄 信号连接已建立", self.port_id)
-        self.add_log("📡 开始扫描舵机...", self.port_id)
+        self.add_log("🔄 Signal connections established", self.port_id)
+        self.add_log("📡 Starting servo scan...", self.port_id)
 
     def on_system_command_result(self, cmd_type, success, message, port_id):
-        """处理系统命令执行结果（中位校准、清除限位等）"""
+        """Handle system command results (mid-point calibration, clear limits, etc.)"""
         if port_id != self.port_id:
             return
         prefix = "✅" if success else "❌"
         self.add_log(f"{prefix} {message}", self.port_id)
 
     def update_status(self, servos, connected, port_id):
-        """更新状态显示"""
+        """Update the status display"""
         if port_id != self.port_id:
             return
 
         print(f"[DEBUG] {port_id} update_status called: servos={servos}, connected={connected}")
         if connected:
-            self.connection_status.setText("🟢 已连接")
+            self.connection_status.setText("🟢 Connected")
             self.connection_status.setStyleSheet("color: #28a745; font-size: 12px; font-weight: bold;")
         else:
-            self.connection_status.setText("🔴 未连接")
+            self.connection_status.setText("🔴 Not Connected")
             self.connection_status.setStyleSheet("color: #dc3545; font-size: 12px; font-weight: bold;")
 
         if servos:
-            self.current_servos_label.setText(f"当前舵机: {', '.join(map(str, servos))}")
-            found_html = "<br>".join([f"<span style='color: #28a745; font-weight: bold;'>• 舵机 ID: {servo_id}</span>" for servo_id in servos])
+            self.current_servos_label.setText(f"Current servos: {', '.join(map(str, servos))}")
+            found_html = "<br>".join([f"<span style='color: #28a745; font-weight: bold;'>• Servo ID: {servo_id}</span>" for servo_id in servos])
             self.servo_list_found.setHtml(found_html)
 
             # 计算 1-6 号槽位中未识别的ID并显示
@@ -1706,10 +1706,10 @@ class ServoPanel(QWidget):
                 missing_html = "<br>".join([f"<span style='color: #dc3545; font-weight: bold;'>• ID {servo_id}</span>" for servo_id in missing_ids])
                 self.servo_list_missing.setHtml(missing_html)
             else:
-                self.servo_list_missing.setHtml("<span style='color: #28a745; font-weight: bold;'>✅ 1-6号槽位全部识别</span>")
+                self.servo_list_missing.setHtml("<span style='color: #28a745; font-weight: bold;'>✅ All slots 1-6 recognized</span>")
         else:
-            self.current_servos_label.setText("当前舵机: 无")
-            self.servo_list_found.setHtml("<span style='color: #dc3545;'>📡 未发现舵机<br><br>请检查:<br>1. 舵机控制器是否连接<br>2. 舵机是否通电<br>3. 串口配置是否正确</span>")
+            self.current_servos_label.setText("Current servos: none")
+            self.servo_list_found.setHtml("<span style='color: #dc3545;'>📡 No servos found<br><br>Please check:<br>1. Is the servo controller connected?<br>2. Is the servo powered?<br>3. Is the serial port configured correctly?</span>")
             self.servo_list_missing.setHtml("")
 
         # 更新按钮状态
@@ -1719,7 +1719,7 @@ class ServoPanel(QWidget):
         self.update_servo_control_state(servos, connected)
 
     def update_button_states(self, servos, connected):
-        """更新按钮状态"""
+        """Update button states"""
         has_servos = connected and len(servos) > 0
 
         for i, btn in enumerate(self.id_buttons):
@@ -1758,7 +1758,7 @@ class ServoPanel(QWidget):
                 """)
 
     def update_servo_control_state(self, servos, connected):
-        """根据在线舵机更新滑动条和力矩按钮可用状态"""
+        """Update slider and torque button availability based on online servos"""
         has_servos = connected and len(servos) > 0
         servo_set = set(servos) if servos else set()
 
@@ -1791,10 +1791,10 @@ class ServoPanel(QWidget):
                 self.servo_voltage_labels[servo_id].setToolTip("")
                 self.servo_temp_labels[servo_id].setToolTip("")
                 torque_btn.setChecked(False)
-                torque_btn.setText("⚡ 力矩")
+                torque_btn.setText("⚡ Torque")
 
     def update_positions(self, positions: dict):
-        """更新各舵机当前位置显示（兼容旧信号）"""
+        """Update each servo's current position display (legacy-signal compatible)"""
         if not positions:
             return
 
@@ -1803,7 +1803,7 @@ class ServoPanel(QWidget):
                 self.servo_pos_labels[servo_id].setText(f"Pos: {pos}")
 
     def update_servo_info(self, info: dict):
-        """更新各舵机完整状态显示（电压、温度、速度、负载、电流、运行状态、型号等）"""
+        """Update each servo's full status display (voltage, temperature, speed, load, current, moving state, model, etc.)"""
         if not info:
             return
 
@@ -1845,13 +1845,13 @@ class ServoPanel(QWidget):
             if errors:
                 active_errors = []
                 if errors.get("overload"):
-                    active_errors.append("过载")
+                    active_errors.append("Overload")
                 if errors.get("over_current"):
-                    active_errors.append("过流")
+                    active_errors.append("Overcurrent")
                 if errors.get("over_voltage"):
-                    active_errors.append("过压")
+                    active_errors.append("Overvoltage")
                 if errors.get("over_heat"):
-                    active_errors.append("过热")
+                    active_errors.append("Overheat")
 
                 if active_errors:
                     status_text = "Status: " + ",".join(active_errors)
@@ -1868,28 +1868,28 @@ class ServoPanel(QWidget):
             # Tooltip 显示更详细信息
             tooltip_lines = [f"ID: {servo_id}"]
             if model is not None:
-                tooltip_lines.append(f"型号: {get_servo_model_name(model)}")
+                tooltip_lines.append(f"Model: {get_servo_model_name(model)}")
             if speed is not None:
-                tooltip_lines.append(f"速度: {speed}")
+                tooltip_lines.append(f"Speed: {speed}")
             if load is not None:
-                tooltip_lines.append(f"负载: {load}")
+                tooltip_lines.append(f"Load: {load}")
             if current is not None:
-                tooltip_lines.append(f"电流: {current_ma:.1f} mA")
+                tooltip_lines.append(f"Current: {current_ma:.1f} mA")
             if moving is not None:
-                tooltip_lines.append(f"运行中: {'是' if moving else '否'}")
+                tooltip_lines.append(f"Moving: {'Yes' if moving else 'No'}")
             if errors:
                 tooltip_lines.append("")
-                tooltip_lines.append("保护状态:")
-                tooltip_lines.append(f"  过载: {'是' if errors.get('overload') else '否'}")
-                tooltip_lines.append(f"  过流: {'是' if errors.get('over_current') else '否'}")
-                tooltip_lines.append(f"  过压: {'是' if errors.get('over_voltage') else '否'}")
-                tooltip_lines.append(f"  过热: {'是' if errors.get('over_heat') else '否'}")
+                tooltip_lines.append("Protection Status:")
+                tooltip_lines.append(f"  Overload: {'Yes' if errors.get('overload') else 'No'}")
+                tooltip_lines.append(f"  Overcurrent: {'Yes' if errors.get('over_current') else 'No'}")
+                tooltip_lines.append(f"  Overvoltage: {'Yes' if errors.get('over_voltage') else 'No'}")
+                tooltip_lines.append(f"  Overheat: {'Yes' if errors.get('over_heat') else 'No'}")
                 tooltip_lines.append("")
-                tooltip_lines.append("保护说明:")
-                tooltip_lines.append("  过载: 堵转>80%持续2s后保护")
-                tooltip_lines.append("  过流: 电流>2A持续2s后保护")
-                tooltip_lines.append("  过压: 电压>8V或<4V保护")
-                tooltip_lines.append("  过热: 温度>70℃关闭扭矩")
+                tooltip_lines.append("Protection Info:")
+                tooltip_lines.append("  Overload: triggers after >80% stall for 2s")
+                tooltip_lines.append("  Overcurrent: triggers after >2A for 2s")
+                tooltip_lines.append("  Overvoltage: triggers at >8V or <4V")
+                tooltip_lines.append("  Overheat: torque disabled above 70℃")
             tooltip = "\n".join(tooltip_lines)
             self.servo_voltage_labels[servo_id].setToolTip(tooltip)
             self.servo_temp_labels[servo_id].setToolTip(tooltip)
@@ -1899,7 +1899,7 @@ class ServoPanel(QWidget):
         self.check_servo_health_ui(info)
 
     def check_servo_health_ui(self, info: dict):
-        """检查舵机健康状态并在日志/状态栏提示"""
+        """Check servo health and report it in the log/status bar"""
         warnings = []
         for servo_id, servo_info in info.items():
             voltage = servo_info.get("voltage")
@@ -1910,22 +1910,22 @@ class ServoPanel(QWidget):
                 v_min, v_max = get_voltage_range(voltage)
                 if voltage < v_min or voltage > v_max:
                     warnings.append(
-                        f"ID{servo_id} 电压异常: {voltage:.1f}V (安全范围 {v_min:.1f}V~{v_max:.1f}V)"
+                        f"ID{servo_id} voltage abnormal: {voltage:.1f}V (safe range {v_min:.1f}V~{v_max:.1f}V)"
                     )
             if temperature is not None and temperature > SAFE_TEMPERATURE_MAX:
                 warnings.append(
-                    f"ID{servo_id} 温度过高: {temperature}°C (建议 < {SAFE_TEMPERATURE_MAX:.0f}°C)"
+                    f"ID{servo_id} temperature too high: {temperature}°C (recommended < {SAFE_TEMPERATURE_MAX:.0f}°C)"
                 )
 
             # 保护状态警告
             if errors.get("overload"):
-                warnings.append(f"ID{servo_id} 过载保护: 堵转>80%持续2s，需重新发位置指令清除")
+                warnings.append(f"ID{servo_id} overload protection: stall >80% for 2s, send a new position command to clear")
             if errors.get("over_current"):
-                warnings.append(f"ID{servo_id} 过流保护: 电流>2A持续2s，需重新发位置指令清除")
+                warnings.append(f"ID{servo_id} overcurrent protection: current >2A for 2s, send a new position command to clear")
             if errors.get("over_voltage"):
-                warnings.append(f"ID{servo_id} 过压保护: 电压>8V或<4V")
+                warnings.append(f"ID{servo_id} overvoltage protection: voltage >8V or <4V")
             if errors.get("over_heat"):
-                warnings.append(f"ID{servo_id} 过热保护: 温度>70℃，已关闭扭矩输出")
+                warnings.append(f"ID{servo_id} overheat protection: temperature >70℃, torque output disabled")
 
         if warnings:
             # 避免过于频繁提示：同一端口 5 秒内最多提示一次
@@ -1934,21 +1934,21 @@ class ServoPanel(QWidget):
             if now - last_warn > 5:
                 self._last_health_warning = now
                 warning_text = " | ".join(warnings)
-                self.add_log(f"🚨 健康警告: {warning_text}", self.port_id)
+                self.add_log(f"🚨 Health warning: {warning_text}", self.port_id)
                 # 如果有父窗口且状态栏可用，也显示在状态栏
                 main_window = self.window()
                 if main_window and hasattr(main_window, "status_bar"):
-                    main_window.status_bar.showMessage(f"🚨 {self.port_id}端口: {warning_text}", 5000)
+                    main_window.status_bar.showMessage(f"🚨 {self.port_id} port: {warning_text}", 5000)
 
     def on_slider_value_changed(self, servo_id: int, value: int):
-        """滑动条数值变化时更新目标位置显示"""
+        """Update the target position display when the slider value changes"""
         if servo_id in self.servo_target_labels:
             self.servo_target_labels[servo_id].setText(f"T: {value}")
 
     def on_slider_released(self, servo_id: int):
-        """滑动条释放后发送目标位置"""
+        """Send the target position after the slider is released"""
         if self.worker is None or not self.worker.is_connected:
-            QMessageBox.warning(self, "警告", "当前端口未连接，无法发送位置命令")
+            QMessageBox.warning(self, "Warning", "Current port is not connected, can't send position command")
             return
 
         slider = self.servo_sliders[servo_id]
@@ -1959,8 +1959,8 @@ class ServoPanel(QWidget):
         if not torque_btn.isChecked():
             reply = QMessageBox.question(
                 self,
-                "力矩未开启",
-                f"ID{servo_id} 力矩未开启，是否先开启力矩再移动？",
+                "Torque not enabled",
+                f"ID{servo_id} torque is not enabled, enable torque before moving?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes
             )
@@ -1968,11 +1968,11 @@ class ServoPanel(QWidget):
                 return
             torque_btn.setChecked(True)
 
-        self.add_log(f"🎚️ ID{servo_id} 目标位置: {target}", self.port_id)
+        self.add_log(f"🎚️ ID{servo_id} target position: {target}", self.port_id)
         self.worker.set_servo_position(servo_id, target)
 
     def on_torque_toggled(self, servo_id: int, checked: bool):
-        """单个舵机力矩按钮切换"""
+        """Toggle a single servo's torque button"""
         if self.worker is None or not self.worker.is_connected:
             return
 
@@ -1981,19 +1981,19 @@ class ServoPanel(QWidget):
         self.worker.set_servo_torque(servo_id, checked)
 
     def on_set_middle_clicked(self, servo_id: int):
-        """设置单个舵机中位值（将当前位置设为 2048）"""
+        """Set a single servo's mid-point value (set current position to 2048)"""
         if self.worker is None or not self.worker.is_connected:
-            QMessageBox.warning(self, "警告", "当前端口未连接")
+            QMessageBox.warning(self, "Warning", "Current port is not connected")
             return
         if servo_id not in self.worker.current_servos:
-            QMessageBox.warning(self, "警告", f"ID{servo_id} 不在线")
+            QMessageBox.warning(self, "Warning", f"ID{servo_id} is offline")
             return
 
         reply = QMessageBox.question(
             self,
-            "确认设置中位",
-            f"确定要将 ID{servo_id} 的当前位置设为中位值（2048）吗？\n\n"
-            f"请确保舵机已处于期望的中位位置。",
+            "Confirm Set Mid-Point",
+            f"Set ID{servo_id}'s current position as its mid-point value (2048)?\n\n"
+            f"Make sure the servo is at the desired mid-point position first.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2003,23 +2003,23 @@ class ServoPanel(QWidget):
         self.worker.queue_system_command({
             "type": "set_middle",
             "servo_id": servo_id,
-            "desc": f"设置 ID{servo_id} 中位"
+            "desc": f"Set ID{servo_id} Mid-Point"
         })
 
     def on_clear_limits_clicked(self, servo_id: int):
-        """清除单个舵机的最小/最大角度限制"""
+        """Clear a single servo's min/max angle limits"""
         if self.worker is None or not self.worker.is_connected:
-            QMessageBox.warning(self, "警告", "当前端口未连接")
+            QMessageBox.warning(self, "Warning", "Current port is not connected")
             return
         if servo_id not in self.worker.current_servos:
-            QMessageBox.warning(self, "警告", f"ID{servo_id} 不在线")
+            QMessageBox.warning(self, "Warning", f"ID{servo_id} is offline")
             return
 
         reply = QMessageBox.question(
             self,
-            "确认清除限位",
-            f"确定要清除 ID{servo_id} 的角度限制吗？\n\n"
-            f"清除后舵机可在完整范围 0~4095 内运动。",
+            "Confirm Clear Limits",
+            f"Clear ID{servo_id}'s angle limits?\n\n"
+            f"After clearing, the servo can move across the full 0~4095 range.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2029,13 +2029,13 @@ class ServoPanel(QWidget):
         self.worker.queue_system_command({
             "type": "clear_angle_limits",
             "servo_id": servo_id,
-            "desc": f"清除 ID{servo_id} 角度限制"
+            "desc": f"Clear ID{servo_id} Angle Limits"
         })
 
     def enable_all_torque(self):
-        """开启所有在线舵机力矩"""
+        """Enable torque on all online servos"""
         if self.worker is None or not self.worker.is_connected:
-            QMessageBox.warning(self, "警告", "当前端口未连接")
+            QMessageBox.warning(self, "Warning", "Current port is not connected")
             return
 
         for servo_id in self.worker.current_servos:
@@ -2044,9 +2044,9 @@ class ServoPanel(QWidget):
                 self.worker.set_servo_torque(servo_id, True)
 
     def disable_all_torque(self):
-        """关闭所有在线舵机力矩"""
+        """Disable torque on all online servos"""
         if self.worker is None or not self.worker.is_connected:
-            QMessageBox.warning(self, "警告", "当前端口未连接")
+            QMessageBox.warning(self, "Warning", "Current port is not connected")
             return
 
         for servo_id in self.worker.current_servos:
@@ -2055,15 +2055,15 @@ class ServoPanel(QWidget):
                 self.worker.set_servo_torque(servo_id, False)
 
     def change_servo_id(self, slot_index):
-        """修改舵机ID - 弹出对话框让用户自定义源ID和目标ID"""
+        """Change servo ID - opens a dialog for the user to set a custom source/target ID"""
         print(f"[DEBUG {self.port_id}] change_servo_id called for slot {slot_index}")
         if self.worker is None:
             print(f"[DEBUG {self.port_id}] worker is None, aborting")
-            QMessageBox.warning(self, "警告", "当前端口已禁用，无法修改ID")
+            QMessageBox.warning(self, "Warning", "Current port is disabled, can't change ID")
             return
         if not self.worker.current_servos:
             print(f"[DEBUG {self.port_id}] current_servos empty, aborting")
-            QMessageBox.warning(self, "警告", "没有可用的舵机进行ID修改")
+            QMessageBox.warning(self, "Warning", "No servos available for ID change")
             return
 
         # 槽位默认目标ID（按钮上显示的数字）
@@ -2099,17 +2099,17 @@ class ServoPanel(QWidget):
 
         if old_id == new_id:
             box = QMessageBox(self)
-            box.setWindowTitle("提示")
-            box.setText("源ID和目标ID相同，无需修改")
+            box.setWindowTitle("Notice")
+            box.setText("Source ID and target ID are the same, no change needed")
             box.setStyleSheet(msg_box_style)
             box.exec()
             return
 
         if new_id in self.worker.current_servos and new_id != old_id:
             box = QMessageBox(self)
-            box.setWindowTitle("确认覆盖")
-            box.setText(f"目标ID {new_id} 已存在其他舵机，是否继续？")
-            box.setInformativeText("继续可能导致总线ID冲突！")
+            box.setWindowTitle("Confirm Overwrite")
+            box.setText(f"Target ID {new_id} is already used by another servo, continue anyway?")
+            box.setInformativeText("Continuing may cause a bus ID conflict!")
             box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
             box.setDefaultButton(QMessageBox.No)
             box.setStyleSheet(msg_box_style)
@@ -2118,16 +2118,16 @@ class ServoPanel(QWidget):
 
         # 确认对话框
         box = QMessageBox(self)
-        box.setWindowTitle(f"确认修改ID ({self.port_name})")
-        box.setText(f"确定要将舵机 ID {old_id} 修改为 ID {new_id} 吗？")
-        box.setInformativeText("系统将自动暂停扫描确保修改成功。")
+        box.setWindowTitle(f"Confirm ID Change ({self.port_name})")
+        box.setText(f"Change servo ID {old_id} to ID {new_id}?")
+        box.setInformativeText("The system will automatically pause scanning to ensure the change succeeds.")
         box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         box.setDefaultButton(QMessageBox.No)
         box.setStyleSheet(msg_box_style)
         reply = box.exec()
 
         if reply == QMessageBox.Yes:
-            self.add_log(f"🎯 提交ID修改请求: {old_id} -> {new_id}", self.port_id)
+            self.add_log(f"🎯 Submitting ID change request: {old_id} -> {new_id}", self.port_id)
 
             # 将请求加入队列（立即返回）
             success, message = self.worker.change_servo_id(old_id, new_id)
@@ -2144,13 +2144,13 @@ class ServoPanel(QWidget):
                 self.add_log(f"❌ {message}", self.port_id)
 
     def request_rescan(self):
-        """请求立即重新扫描舵机"""
-        self.add_log("🔄 手动请求重新扫描...", self.port_id)
+        """Request an immediate servo rescan"""
+        self.add_log("🔄 Manual rescan requested...", self.port_id)
         if self.worker:
             self.worker.request_rescan()
 
     def on_id_changed(self, old_id, new_id, success, message, port_id):
-        """处理ID修改结果"""
+        """Handle the ID-change result"""
         if port_id != self.port_id:
             return
 
@@ -2160,9 +2160,9 @@ class ServoPanel(QWidget):
             return
 
         if success:
-            QMessageBox.information(self, f"修改成功 ({self.port_name})", f"ID修改成功！\n{old_id} -> {new_id}")
+            QMessageBox.information(self, f"Change Successful ({self.port_name})", f"ID changed successfully!\n{old_id} -> {new_id}")
             # 强制重新扫描舵机列表
-            self.add_log(f"🔄 ID修改成功，重新扫描舵机...", self.port_id)
+            self.add_log(f"🔄 ID changed successfully, rescanning servos...", self.port_id)
             # 给舵机一点时间响应新ID
             time.sleep(0.5)
             # 更新内部的舵机列表
@@ -2174,13 +2174,13 @@ class ServoPanel(QWidget):
             # 手动触发状态更新，刷新按钮显示
             self.update_status(self.worker.current_servos, self.worker.is_connected, self.port_id)
         else:
-            QMessageBox.critical(self, f"修改失败 ({self.port_name})", f"ID修改失败！\n{message}")
-            self.add_log(f"❌ 队列中ID修改失败: {old_id} -> {new_id}", self.port_id)
+            QMessageBox.critical(self, f"Change Failed ({self.port_name})", f"ID change failed!\n{message}")
+            self.add_log(f"❌ Queued ID change failed: {old_id} -> {new_id}", self.port_id)
             # 刷新按钮状态
             self.update_button_states(self.worker.current_servos, self.worker.is_connected)
 
     def add_log(self, message, port_id):
-        """添加日志消息"""
+        """Add a log message"""
         if port_id != self.port_id:
             return
 
@@ -2205,18 +2205,18 @@ class ServoPanel(QWidget):
             cursor.removeSelectedText()
 
     def update_port_name(self, new_port_name: str):
-        """更新端口名称和标题"""
+        """Update the port name and title"""
         self.port_name = new_port_name
-        self.title_label.setText(f"🏭 {self.port_name} - 舵机标定")
+        self.title_label.setText(f"🏭 {self.port_name} - Servo Calibration")
 
     def stop(self):
-        """停止工作线程"""
+        """Stop the worker thread"""
         if self.worker:
             self.worker.stop()
 
 
 class AdvancedToolsPanel(QWidget):
-    """高级工具面板：寄存器读写、波特率修改、恢复出厂设置"""
+    """Advanced tools panel: register read/write, baud rate change, factory reset"""
 
     def __init__(self, servo_panel: ServoPanel):
         super().__init__()
@@ -2261,17 +2261,17 @@ class AdvancedToolsPanel(QWidget):
         """)
 
         # 标题
-        title = QLabel(f"🔧 高级工具 - {self.servo_panel.port_name}")
+        title = QLabel(f"🔧 Advanced Tools - {self.servo_panel.port_name}")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
         # 舵机选择
-        servo_group = QGroupBox("🎯 目标舵机")
+        servo_group = QGroupBox("🎯 Target Servo")
         servo_layout = QHBoxLayout()
         servo_group.setLayout(servo_layout)
 
-        servo_label = QLabel("舵机ID:")
+        servo_label = QLabel("Servo ID:")
         servo_label.setStyleSheet("font-size: 12px;")
         servo_layout.addWidget(servo_label)
 
@@ -2290,7 +2290,7 @@ class AdvancedToolsPanel(QWidget):
 
         refresh_btn = QPushButton("🔄")
         refresh_btn.setFixedSize(28, 28)
-        refresh_btn.setToolTip("刷新舵机列表")
+        refresh_btn.setToolTip("Refresh Servo List")
         refresh_btn.clicked.connect(self.refresh_servo_ids)
         servo_layout.addWidget(refresh_btn)
 
@@ -2298,26 +2298,26 @@ class AdvancedToolsPanel(QWidget):
         layout.addWidget(servo_group)
 
         # 寄存器读取
-        read_group = QGroupBox("📖 寄存器读取")
+        read_group = QGroupBox("📖 Register Read")
         read_layout = QGridLayout()
         read_group.setLayout(read_layout)
 
-        read_layout.addWidget(QLabel("地址:"), 0, 0)
+        read_layout.addWidget(QLabel("Address:"), 0, 0)
         self.read_addr_spin = QSpinBox()
         self.read_addr_spin.setRange(0, 255)
         self.read_addr_spin.setDisplayIntegerBase(16)
         self.read_addr_spin.setPrefix("0x")
         read_layout.addWidget(self.read_addr_spin, 0, 1)
 
-        read_layout.addWidget(QLabel("长度:"), 0, 2)
+        read_layout.addWidget(QLabel("Length:"), 0, 2)
         self.read_len_combo = QComboBox()
-        self.read_len_combo.addItems(["1 字节", "2 字节", "4 字节"])
+        self.read_len_combo.addItems(["1 byte", "2 bytes", "4 bytes"])
         self.read_len_combo.setItemData(0, 1)
         self.read_len_combo.setItemData(1, 2)
         self.read_len_combo.setItemData(2, 4)
         read_layout.addWidget(self.read_len_combo, 0, 3)
 
-        self.read_btn = QPushButton("🔍 读取")
+        self.read_btn = QPushButton("🔍 Read")
         self.read_btn.setStyleSheet("""
             QPushButton {
                 background-color: #17a2b8; color: white; border: none;
@@ -2329,39 +2329,39 @@ class AdvancedToolsPanel(QWidget):
         self.read_btn.clicked.connect(self.on_read_register)
         read_layout.addWidget(self.read_btn, 1, 0, 1, 2)
 
-        self.read_result_label = QLabel("结果: --")
+        self.read_result_label = QLabel("Result: --")
         self.read_result_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 12px; color: #495057;")
         read_layout.addWidget(self.read_result_label, 1, 2, 1, 2)
 
         layout.addWidget(read_group)
 
         # 寄存器写入
-        write_group = QGroupBox("✏️ 寄存器写入")
+        write_group = QGroupBox("✏️ Register Write")
         write_layout = QGridLayout()
         write_group.setLayout(write_layout)
 
-        write_layout.addWidget(QLabel("地址:"), 0, 0)
+        write_layout.addWidget(QLabel("Address:"), 0, 0)
         self.write_addr_spin = QSpinBox()
         self.write_addr_spin.setRange(0, 255)
         self.write_addr_spin.setDisplayIntegerBase(16)
         self.write_addr_spin.setPrefix("0x")
         write_layout.addWidget(self.write_addr_spin, 0, 1)
 
-        write_layout.addWidget(QLabel("长度:"), 0, 2)
+        write_layout.addWidget(QLabel("Length:"), 0, 2)
         self.write_len_combo = QComboBox()
-        self.write_len_combo.addItems(["1 字节", "2 字节", "4 字节"])
+        self.write_len_combo.addItems(["1 byte", "2 bytes", "4 bytes"])
         self.write_len_combo.setItemData(0, 1)
         self.write_len_combo.setItemData(1, 2)
         self.write_len_combo.setItemData(2, 4)
         write_layout.addWidget(self.write_len_combo, 0, 3)
 
-        write_layout.addWidget(QLabel("数值:"), 1, 0)
+        write_layout.addWidget(QLabel("Value:"), 1, 0)
         self.write_value_spin = QSpinBox()
         self.write_value_spin.setRange(0, 2147483647)
         self.write_value_spin.setDisplayIntegerBase(10)
         write_layout.addWidget(self.write_value_spin, 1, 1)
 
-        self.write_btn = QPushButton("✏️ 写入")
+        self.write_btn = QPushButton("✏️ Write")
         self.write_btn.setStyleSheet("""
             QPushButton {
                 background-color: #fd7e14; color: white; border: none;
@@ -2376,17 +2376,17 @@ class AdvancedToolsPanel(QWidget):
         layout.addWidget(write_group)
 
         # 波特率修改
-        baud_group = QGroupBox("🔌 波特率修改")
+        baud_group = QGroupBox("🔌 Baud Rate Change")
         baud_layout = QHBoxLayout()
         baud_group.setLayout(baud_layout)
 
-        baud_layout.addWidget(QLabel("新波特率:"))
+        baud_layout.addWidget(QLabel("New Baud Rate:"))
         self.baud_combo = QComboBox()
         for rate in [1000000, 500000, 250000, 128000, 115200, 76800, 57600, 38400]:
             self.baud_combo.addItem(str(rate), rate)
         baud_layout.addWidget(self.baud_combo)
 
-        self.baud_btn = QPushButton("🔧 修改波特率")
+        self.baud_btn = QPushButton("🔧 Change Baud Rate")
         self.baud_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6f42c1; color: white; border: none;
@@ -2402,16 +2402,16 @@ class AdvancedToolsPanel(QWidget):
         layout.addWidget(baud_group)
 
         # 恢复出厂设置
-        reset_group = QGroupBox("🔄 恢复出厂设置")
+        reset_group = QGroupBox("🔄 Factory Reset")
         reset_layout = QHBoxLayout()
         reset_group.setLayout(reset_layout)
 
-        reset_info = QLabel("⚠️ 将舵机恢复为出厂状态（ID 变回 1，波特率变回 1000000）")
+        reset_info = QLabel("⚠️ Restore the servo to factory state (ID reverts to 1, baud rate reverts to 1000000)")
         reset_info.setStyleSheet("color: #856404; font-size: 11px;")
         reset_info.setWordWrap(True)
         reset_layout.addWidget(reset_info)
 
-        self.reset_btn = QPushButton("🔄 恢复出厂")
+        self.reset_btn = QPushButton("🔄 Factory Reset")
         self.reset_btn.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545; color: white; border: none;
@@ -2426,7 +2426,7 @@ class AdvancedToolsPanel(QWidget):
         layout.addWidget(reset_group)
 
         # 操作日志
-        log_group = QGroupBox("📋 操作日志")
+        log_group = QGroupBox("📋 Operation Log")
         log_layout = QVBoxLayout()
         log_group.setLayout(log_layout)
 
@@ -2442,7 +2442,7 @@ class AdvancedToolsPanel(QWidget):
         """)
         log_layout.addWidget(self.adv_log_text)
 
-        clear_btn = QPushButton("清空")
+        clear_btn = QPushButton("Clear")
         clear_btn.setMaximumWidth(60)
         clear_btn.clicked.connect(self.adv_log_text.clear)
         log_layout.addWidget(clear_btn)
@@ -2455,7 +2455,7 @@ class AdvancedToolsPanel(QWidget):
         self.update_button_states()
 
     def init_connections(self):
-        """初始化信号连接"""
+        """Initialize signal connections"""
         if self.worker is None:
             return
         self.worker.register_read_result.connect(self.on_register_read_result)
@@ -2463,7 +2463,7 @@ class AdvancedToolsPanel(QWidget):
         self.worker.status_updated.connect(self.on_status_updated)
 
     def refresh_servo_ids(self):
-        """刷新舵机ID列表"""
+        """Refresh the servo ID list"""
         self.servo_id_combo.clear()
         servos = []
         if self.worker:
@@ -2472,11 +2472,11 @@ class AdvancedToolsPanel(QWidget):
             for sid in servos:
                 self.servo_id_combo.addItem(f"ID{sid}", sid)
         else:
-            self.servo_id_combo.addItem("无舵机", None)
+            self.servo_id_combo.addItem("No Servos", None)
         self.update_button_states()
 
     def update_button_states(self):
-        """根据是否有在线舵机更新按钮状态"""
+        """Update button state based on whether any servo is online"""
         has_worker = self.worker is not None and self.worker.is_connected
         has_servos = has_worker and len(self.worker.current_servos) > 0
         enabled = has_servos and self.servo_id_combo.currentData() is not None
@@ -2487,40 +2487,40 @@ class AdvancedToolsPanel(QWidget):
         self.reset_btn.setEnabled(enabled)
 
     def get_selected_servo_id(self):
-        """获取选中的舵机ID"""
+        """Get the selected servo ID"""
         return self.servo_id_combo.currentData()
 
     def add_log(self, message):
-        """添加日志"""
+        """Add a log entry"""
         timestamp = time.strftime("%H:%M:%S")
         self.adv_log_text.append(f"[{timestamp}] {message}")
         scrollbar = self.adv_log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def on_read_register(self):
-        """读取寄存器"""
+        """Read a register"""
         servo_id = self.get_selected_servo_id()
         if servo_id is None or self.worker is None:
-            QMessageBox.warning(self, "警告", "请先选择舵机")
+            QMessageBox.warning(self, "Warning", "Please select a servo first")
             return
 
         address = self.read_addr_spin.value()
         length = self.read_len_combo.currentData()
 
-        self.read_result_label.setText("结果: 读取中...")
+        self.read_result_label.setText("Result: reading...")
         self.worker.queue_system_command({
             "type": "register_read",
             "servo_id": servo_id,
             "address": address,
             "length": length,
-            "desc": f"读取 ID{servo_id} 寄存器 0x{address:02X}",
+            "desc": f"Read ID{servo_id} register 0x{address:02X}",
         })
 
     def on_write_register(self):
-        """写入寄存器"""
+        """Write a register"""
         servo_id = self.get_selected_servo_id()
         if servo_id is None or self.worker is None:
-            QMessageBox.warning(self, "警告", "请先选择舵机")
+            QMessageBox.warning(self, "Warning", "Please select a servo first")
             return
 
         address = self.write_addr_spin.value()
@@ -2529,8 +2529,8 @@ class AdvancedToolsPanel(QWidget):
 
         reply = QMessageBox.question(
             self,
-            "确认写入",
-            f"确定要写入 ID{servo_id} 寄存器 0x{address:02X} = {value} ({length}字节) 吗？",
+            "Confirm Write",
+            f"Write ID{servo_id} register 0x{address:02X} = {value} ({length} bytes)?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2543,23 +2543,23 @@ class AdvancedToolsPanel(QWidget):
             "address": address,
             "length": length,
             "value": value,
-            "desc": f"写入 ID{servo_id} 寄存器 0x{address:02X}",
+            "desc": f"Write ID{servo_id} register 0x{address:02X}",
         })
 
     def on_change_baud_rate(self):
-        """修改波特率"""
+        """Change baud rate"""
         servo_id = self.get_selected_servo_id()
         if servo_id is None or self.worker is None:
-            QMessageBox.warning(self, "警告", "请先选择舵机")
+            QMessageBox.warning(self, "Warning", "Please select a servo first")
             return
 
         new_baud = self.baud_combo.currentData()
         reply = QMessageBox.warning(
             self,
-            "警告：修改波特率",
-            f"修改波特率后，串口将立即切换到 {new_baud} bps。\n"
-            f"如果失败，工具会尝试恢复原有波特率。\n\n"
-            f"确定要修改 ID{servo_id} 的波特率吗？",
+            "Warning: Change Baud Rate",
+            f"After changing the baud rate, the serial port will switch to {new_baud} bps immediately.\n"
+            f"If it fails, the tool will try to restore the original baud rate.\n\n"
+            f"Change ID{servo_id}'s baud rate?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2570,25 +2570,25 @@ class AdvancedToolsPanel(QWidget):
             "type": "baud_rate_change",
             "servo_id": servo_id,
             "baud_rate": new_baud,
-            "desc": f"修改 ID{servo_id} 波特率为 {new_baud}",
+            "desc": f"Change ID{servo_id} baud rate to {new_baud}",
         })
 
     def on_factory_reset(self):
-        """恢复出厂设置"""
+        """Factory reset"""
         servo_id = self.get_selected_servo_id()
         if servo_id is None or self.worker is None:
-            QMessageBox.warning(self, "警告", "请先选择舵机")
+            QMessageBox.warning(self, "Warning", "Please select a servo first")
             return
 
         reply = QMessageBox.critical(
             self,
-            "危险：恢复出厂设置",
-            f"确定要恢复 ID{servo_id} 的出厂设置吗？\n\n"
-            f"这将导致：\n"
-            f"• 舵机 ID 变回 1\n"
-            f"• 波特率变回 1000000\n"
-            f"• 所有参数恢复默认值\n\n"
-            f"此操作不可撤销！",
+            "Danger: Factory Reset",
+            f"Restore ID{servo_id} to factory settings?\n\n"
+            f"This will:\n"
+            f"• Revert the servo ID to 1\n"
+            f"• Revert the baud rate to 1000000\n"
+            f"• Restore all parameters to defaults\n\n"
+            f"This action cannot be undone!",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2598,41 +2598,41 @@ class AdvancedToolsPanel(QWidget):
         self.worker.queue_system_command({
             "type": "factory_reset",
             "servo_id": servo_id,
-            "desc": f"恢复 ID{servo_id} 出厂设置",
+            "desc": f"Restore ID{servo_id} Factory Settings",
         })
 
     def on_register_read_result(self, servo_id, address, length, value, result, port_id):
-        """处理寄存器读取结果"""
+        """Handle register read result"""
         if port_id != self.servo_panel.port_id:
             return
-        if result == "读取成功":
+        if result == "Read successful":
             self.read_result_label.setText(
-                f"结果: {value} (0x{value:X})"
+                f"Result: {value} (0x{value:X})"
             )
             self.add_log(f"✅ ID{servo_id} 0x{address:02X} = {value} (0x{value:X})")
         else:
-            self.read_result_label.setText(f"结果: {result}")
+            self.read_result_label.setText(f"Result: {result}")
             self.add_log(f"❌ ID{servo_id} 0x{address:02X} {result}")
 
     def on_system_command_result(self, cmd_type, success, message, port_id):
-        """处理系统命令结果"""
+        """Handle system command result"""
         if port_id != self.servo_panel.port_id:
             return
         prefix = "✅" if success else "❌"
         self.add_log(f"{prefix} {message}")
         if cmd_type in ("baud_rate_change", "factory_reset") and success:
             # 这些操作后需要重新扫描
-            self.add_log("🔄 请手动点击重新扫描以更新舵机列表")
+            self.add_log("🔄 Please click Rescan manually to update the servo list")
 
     def on_status_updated(self, servos, connected, port_id):
-        """舵机列表变化时刷新ID选择"""
+        """Refresh ID selection when the servo list changes"""
         if port_id != self.servo_panel.port_id:
             return
         self.refresh_servo_ids()
 
 
 class EZToolUI(QMainWindow):
-    """EZ Tool - 简化版双串口工厂舵机标定工具"""
+    """EZ Tool - Simplified dual-serial-port factory servo calibration tool"""
 
     def __init__(self, left_port: str = None, right_port: str = None):
         # Auto-detect default ports using port_utils
@@ -2673,18 +2673,18 @@ class EZToolUI(QMainWindow):
         self.port_refresh_timer.start(2000)  # 每 2 秒刷新一次
 
     def stop_port_refresh(self):
-        """停止串口自动刷新（例如校准时避免干扰）"""
+        """Stop automatic serial port refresh (e.g. to avoid interference during calibration)"""
         if hasattr(self, 'port_refresh_timer') and self.port_refresh_timer.isActive():
             self.port_refresh_timer.stop()
 
     def start_port_refresh(self):
-        """恢复串口自动刷新"""
+        """Resume automatic serial port refresh"""
         if hasattr(self, 'port_refresh_timer') and not self.port_refresh_timer.isActive():
             self.port_refresh_timer.start(2000)
 
     def init_ui(self):
-        """初始化界面"""
-        self.setWindowTitle("🏭 双串口工厂舵机标定工具")
+        """Initialize the UI"""
+        self.setWindowTitle("🏭 Dual-Serial-Port Factory Servo Calibration Tool")
         # 初始尺寸限制在屏幕可用区域内：
         # 否则在 125%/150% 缩放的 Windows 小屏上，窗口比屏幕还大，
         # 最大化时窗口反而缩小，面板内容高度不足导致控件相互重叠
@@ -2709,12 +2709,12 @@ class EZToolUI(QMainWindow):
         header_layout = QHBoxLayout()
 
         # 左侧标题
-        title_label = QLabel("🏭 双串口工厂舵机标定工具")
+        title_label = QLabel("🏭 Dual-Serial-Port Factory Servo Calibration Tool")
         title_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #2c3e50;")
         header_layout.addWidget(title_label)
 
         # 串口选择区域
-        port_selection_group = QGroupBox("串口选择")
+        port_selection_group = QGroupBox("Serial Port Selection")
         port_selection_group.setStyleSheet("""
             QGroupBox {
                 font-size: 12px;
@@ -2738,7 +2738,7 @@ class EZToolUI(QMainWindow):
         # 左串口选择
         left_port_layout = QVBoxLayout()
         left_port_layout.setSpacing(2)
-        left_label = QLabel("串口1:")
+        left_label = QLabel("Port 1:")
         left_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #495057;")
         left_port_layout.addWidget(left_label)
 
@@ -2764,7 +2764,7 @@ class EZToolUI(QMainWindow):
         # 右串口选择
         right_port_layout = QVBoxLayout()
         right_port_layout.setSpacing(2)
-        right_label = QLabel("串口2:")
+        right_label = QLabel("Port 2:")
         right_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #495057;")
         right_port_layout.addWidget(right_label)
 
@@ -2810,7 +2810,7 @@ class EZToolUI(QMainWindow):
             }
         """)
         refresh_btn.clicked.connect(self.refresh_ports)
-        refresh_btn.setToolTip("刷新串口列表")
+        refresh_btn.setToolTip("Refresh Port List")
         port_selection_layout.addWidget(refresh_btn)
 
         header_layout.addWidget(port_selection_group)
@@ -2830,7 +2830,7 @@ class EZToolUI(QMainWindow):
         buttons_row.setSpacing(8)
 
         # 串口1中位校准按钮
-        self.left_calib_btn = QPushButton("串口1中位校准")
+        self.left_calib_btn = QPushButton("Port 1 Mid-Point Calibration")
         self.left_calib_btn.setFixedSize(100, 35)
         self.left_calib_btn.setStyleSheet("""
             QPushButton {
@@ -2855,7 +2855,7 @@ class EZToolUI(QMainWindow):
         buttons_row.addWidget(self.left_calib_btn)
 
         # 串口1中位测试按钮
-        self.left_test_btn = QPushButton("串口1中位测试")
+        self.left_test_btn = QPushButton("Port 1 Mid-Point Test")
         self.left_test_btn.setFixedSize(100, 35)
         self.left_test_btn.setStyleSheet("""
             QPushButton {
@@ -2880,7 +2880,7 @@ class EZToolUI(QMainWindow):
         buttons_row.addWidget(self.left_test_btn)
 
         # 串口1失能电机按钮
-        self.left_disable_btn = QPushButton("串口1失能电机")
+        self.left_disable_btn = QPushButton("Port 1 Disable Motor")
         self.left_disable_btn.setFixedSize(100, 35)
         self.left_disable_btn.setStyleSheet("""
             QPushButton {
@@ -2910,7 +2910,7 @@ class EZToolUI(QMainWindow):
         buttons_row.addWidget(separator_label)
 
         # 串口2中位校准按钮
-        self.right_calib_btn = QPushButton("串口2中位校准")
+        self.right_calib_btn = QPushButton("Port 2 Mid-Point Calibration")
         self.right_calib_btn.setFixedSize(100, 35)
         self.right_calib_btn.setStyleSheet("""
             QPushButton {
@@ -2935,7 +2935,7 @@ class EZToolUI(QMainWindow):
         buttons_row.addWidget(self.right_calib_btn)
 
         # 串口2中位测试按钮
-        self.right_test_btn = QPushButton("串口2中位测试")
+        self.right_test_btn = QPushButton("Port 2 Mid-Point Test")
         self.right_test_btn.setFixedSize(100, 35)
         self.right_test_btn.setStyleSheet("""
             QPushButton {
@@ -2960,7 +2960,7 @@ class EZToolUI(QMainWindow):
         buttons_row.addWidget(self.right_test_btn)
 
         # 串口2失能电机按钮
-        self.right_disable_btn = QPushButton("串口2失能电机")
+        self.right_disable_btn = QPushButton("Port 2 Disable Motor")
         self.right_disable_btn.setFixedSize(100, 35)
         self.right_disable_btn.setStyleSheet("""
             QPushButton {
@@ -2998,7 +2998,7 @@ class EZToolUI(QMainWindow):
         # 创建状态栏（必须先创建，因为标签页初始化会使用 status_bar）
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("双串口系统已启动 - 左右独立操作 + 中间值校准")
+        self.status_bar.showMessage("Dual-serial-port system started - independent left/right operation + mid-point calibration")
 
         # 创建标签页
         self.tab_widget = QTabWidget()
@@ -3028,7 +3028,7 @@ class EZToolUI(QMainWindow):
         # 设置分割器比例
         splitter.setSizes([800, 800])
 
-        self.tab_widget.addTab(servo_tab, "🦾 舵机标定")
+        self.tab_widget.addTab(servo_tab, "🦾 Servo Calibration")
 
         # === Tab 2: 单舵机控制 ===
         single_control_tab = QWidget()
@@ -3042,7 +3042,7 @@ class EZToolUI(QMainWindow):
         single_control_splitter.setSizes([800, 800])
 
         single_control_layout.addWidget(single_control_splitter)
-        self.tab_widget.addTab(single_control_tab, "🎚️ 单舵机控制")
+        self.tab_widget.addTab(single_control_tab, "🎚️ Single Servo Control")
 
         # === Tab 3: 高级工具 ===
         advanced_tab = QWidget()
@@ -3058,7 +3058,7 @@ class EZToolUI(QMainWindow):
         advanced_splitter.setSizes([800, 800])
 
         advanced_tab_layout.addWidget(advanced_splitter)
-        self.tab_widget.addTab(advanced_tab, "🔧 高级工具")
+        self.tab_widget.addTab(advanced_tab, "🔧 Advanced Tools")
 
         # 设置整体样式
         self.setStyleSheet("""
@@ -3069,8 +3069,8 @@ class EZToolUI(QMainWindow):
 
     @staticmethod
     def _wrap_in_scroll_area(widget):
-        """把面板包进滚动区域：窗口高度不足时显示滚动条，
-        避免布局被过度压缩导致控件（如ID标定1-6按钮）相互重叠"""
+        """Wrap the panel in a scroll area: shows a scrollbar when the window is too short,
+        preventing the layout from being compressed enough that controls (e.g. the ID calibration 1-6 buttons) overlap"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -3078,12 +3078,12 @@ class EZToolUI(QMainWindow):
         return scroll
 
     def init_connections(self):
-        """初始化信号连接"""
+        """Initialize signal connections"""
         # 添加初始日志
-        self.status_bar.showMessage("双串口系统已启动 - 左右独立操作 + 中间值校准", 3000)
+        self.status_bar.showMessage("Dual-serial-port system started - independent left/right operation + mid-point calibration", 3000)
 
     def toggle_remote_control(self):
-        """切换遥控操作"""
+        """Toggle remote-control operation"""
         if self.remote_worker is None:
             # 创建遥控工作线程，传递当前选择的端口
             self.remote_worker = RemoteControlWorker(
@@ -3102,7 +3102,7 @@ class EZToolUI(QMainWindow):
             self.stop_remote_control()
 
     def start_remote_control(self):
-        """启动遥控操作"""
+        """Start remote-control operation"""
         # 停止现有的舵机标定操作，避免端口冲突
         if self.left_panel.worker.is_connected:
             self.left_panel.worker.stop()
@@ -3113,7 +3113,7 @@ class EZToolUI(QMainWindow):
         success, message = self.remote_worker.start_remote_control()
 
         if success:
-            self.remote_btn.setText("⏹️ 停止")
+            self.remote_btn.setText("⏹️ Stop")
             self.remote_btn.setStyleSheet("""
                 QPushButton {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3130,20 +3130,20 @@ class EZToolUI(QMainWindow):
                 }
             """)
             self.add_remote_log(f"✅ {message}")
-            self.status_bar.showMessage(f"遥控操作已启动 - {self.left_port}读取，{self.right_port}控制", 5000)
+            self.status_bar.showMessage(f"Remote-control operation started - reading {self.left_port}, controlling {self.right_port}", 5000)
         else:
             self.add_remote_log(f"❌ {message}")
-            QMessageBox.critical(self, "启动失败", f"无法启动遥控操作:\n{message}")
+            QMessageBox.critical(self, "Start Failed", f"Can't start remote-control operation:\n{message}")
 
     def stop_remote_control(self):
-        """停止遥控操作"""
+        """Stop remote-control operation"""
         if self.remote_worker is None:
             return False
 
         success, message = self.remote_worker.stop_remote_control()
 
         if success:
-            self.remote_btn.setText("🎮 遥控")
+            self.remote_btn.setText("🎮 Remote Control")
             self.remote_btn.setStyleSheet("""
                 QPushButton {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3160,7 +3160,7 @@ class EZToolUI(QMainWindow):
                 }
                 """)
             self.add_remote_log(f"✅ {message}")
-            self.status_bar.showMessage("遥控操作已停止", 3000)
+            self.status_bar.showMessage("Remote-control operation stopped", 3000)
 
             # 重新启动舵机标定操作
             self.left_panel.worker.start()
@@ -3169,18 +3169,19 @@ class EZToolUI(QMainWindow):
             self.add_remote_log(f"❌ {message}")
 
     def _begin_tool_action(self, port_name: str) -> int:
-        """开始一个串口工具操作（校准/中位测试/失能）。
+        """Start a serial port tool operation (calibration/mid-point test/disable).
 
-        递增该端口的操作代次，并终止该端口上一个仍在运行的工具子进程，
-        保证新操作一定能拿到串口（Windows 下串口独占，旧进程不释放就会 PermissionError）。
-        返回本次操作的代次号。
+        Increments this port's operation generation counter, and terminates any tool subprocess
+        still running for this port, guaranteeing the new operation can always claim the serial
+        port (serial ports are exclusive on Windows -- an old process that doesn't release it causes a PermissionError).
+        Returns this operation's generation number.
         """
         gen = self._tool_gen.get(port_name, 0) + 1
         self._tool_gen[port_name] = gen
 
         proc = self._tool_procs.get(port_name)
         if proc is not None and proc.poll() is None:
-            self.add_remote_log(f"⏹️ 终止{port_name}上一个仍在运行的工具进程，释放串口...")
+            self.add_remote_log(f"⏹️ Terminating {port_name}'s previous still-running tool process, releasing serial port...")
             try:
                 proc.terminate()
                 proc.wait(timeout=3)
@@ -3193,16 +3194,16 @@ class EZToolUI(QMainWindow):
         return gen
 
     def _is_latest_tool_action(self, port_name: str, gen: int) -> bool:
-        """判断本次操作是否仍是该端口最新的操作（被新操作取代的旧线程不应再恢复扫描线程）"""
+        """Check whether this operation is still the latest for this port (an old thread superseded by a new operation should not resume the scan thread)"""
         return self._tool_gen.get(port_name) == gen
 
     def _register_tool_process(self, port_name: str, process):
-        """登记该端口当前运行的工具子进程"""
+        """Register the tool subprocess currently running for this port"""
         self._tool_procs[port_name] = process
 
     def _tool_panel_log(self, port_name: str, message: str):
-        """把工具执行结果写到对应面板的操作日志（经 worker 信号转发，线程安全），
-        避免失败信息只在状态栏一闪而过导致用户以为"没反应\""""
+        """Write the tool's execution result to the corresponding panel's operation log (forwarded via worker signal, thread-safe),
+        so a failure message doesn't just flash in the status bar and make the user think nothing happened"""
         panel = self.left_panel if port_name == self.left_port else self.right_panel
         try:
             if panel is not None and panel.worker is not None:
@@ -3211,19 +3212,19 @@ class EZToolUI(QMainWindow):
             pass
 
     def run_quick_calibration(self, port_name: str):
-        """快速中位校准 - 非阻塞执行"""
-        self.add_remote_log(f"🔧 开始{port_name}快速中位校准...")
-        self.status_bar.showMessage(f"正在执行{port_name}中位校准...", 5000)
+        """Quick mid-point calibration - non-blocking"""
+        self.add_remote_log(f"🔧 Starting {port_name} quick mid-point calibration...")
+        self.status_bar.showMessage(f"Running {port_name} mid-point calibration...", 5000)
 
         # 先终止该端口上一个仍在运行的工具进程，确保能拿到串口
         gen = self._begin_tool_action(port_name)
 
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker.is_connected:
-            self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备校准")
+            self.add_remote_log(f"⏸️ Stopped {port_name} scan thread, preparing to calibrate")
             self.left_panel.worker.stop()
         elif port_name == self.right_port and self.right_panel.worker.is_connected:
-            self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备校准")
+            self.add_remote_log(f"⏸️ Stopped {port_name} scan thread, preparing to calibrate")
             self.right_panel.worker.stop()
 
         # 等待端口释放
@@ -3236,12 +3237,12 @@ class EZToolUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
-        self.add_remote_log(f"📝 {port_name}校准进程已启动，请等待执行完成")
+        self.add_remote_log(f"📝 {port_name} calibration process started, please wait for it to finish")
 
     def _execute_quick_calibration(self, port_name: str, gen: int):
-        """执行快速中位校准的线程函数"""
+        """Thread function that performs quick mid-point calibration"""
         try:
-            self.add_remote_log(f"🔍 查找校准脚本...")
+            self.add_remote_log(f"🔍 Looking for calibration script...")
             # 使用 -m 模块方式运行，确保能找到 scservo_sdk
 
             # 检查使用哪个脚本
@@ -3249,13 +3250,13 @@ class EZToolUI(QMainWindow):
             quick_script = os.path.join(tools_dir, 'servo_quick_calibration.py')
 
             if os.path.exists(quick_script):
-                self.add_remote_log(f"✅ 找到校准脚本: servo_quick_calibration.py")
+                self.add_remote_log(f"✅ Found calibration script: servo_quick_calibration.py")
                 command = [sys.executable, '-m', 'src.tools.servo_quick_calibration', port_name]
             else:
-                self.add_remote_log(f"⚠️ 未找到servo_quick_calibration.py，使用servo_middle_calibration.py")
+                self.add_remote_log(f"⚠️ servo_quick_calibration.py not found, using servo_middle_calibration.py")
                 command = [sys.executable, '-m', 'src.tools.servo_middle_calibration', port_name, "2"]  # 使用自动模式
 
-            self.add_remote_log(f"🚀 启动校准进程: {' '.join(command)}")
+            self.add_remote_log(f"🚀 Starting calibration process: {' '.join(command)}")
 
             process = subprocess.Popen(
                 command,
@@ -3270,7 +3271,7 @@ class EZToolUI(QMainWindow):
             self._register_tool_process(port_name, process)
 
             # 监控输出
-            important_keywords = ["连接", "扫描", "校准", "完成", "失败", "错误", "成功", "发现"]
+            important_keywords = ["Connect", "Scan", "Calibrate", "Done", "Failed", "Error", "Success", "Found"]
             while process.poll() is None:
                 try:
                     line = process.stdout.readline()
@@ -3287,34 +3288,34 @@ class EZToolUI(QMainWindow):
             return_code = process.wait()
             self._tool_procs.pop(port_name, None)
             if not self._is_latest_tool_action(port_name, gen):
-                self.add_remote_log(f"ℹ️ {port_name}中位校准已被新操作中断/取代")
+                self.add_remote_log(f"ℹ️ {port_name} mid-point calibration was interrupted/superseded by a new operation")
                 return
             if return_code == 0:
-                self.add_remote_log(f"✅ {port_name}中位校准完成 - 进程正常退出")
-                self._tool_panel_log(port_name, f"✅ {port_name}中位校准完成")
-                self.status_bar.showMessage(f"{port_name}校准完成", 3000)
+                self.add_remote_log(f"✅ {port_name} mid-point calibration complete - process exited normally")
+                self._tool_panel_log(port_name, f"✅ {port_name} mid-point calibration complete")
+                self.status_bar.showMessage(f"{port_name} calibration complete", 3000)
             else:
-                self.add_remote_log(f"❌ {port_name}中位校准失败 - 退出码: {return_code}")
-                self._tool_panel_log(port_name, f"❌ {port_name}中位校准失败 - 退出码: {return_code}")
-                self.status_bar.showMessage(f"{port_name}校准失败", 3000)
+                self.add_remote_log(f"❌ {port_name} mid-point calibration failed - exit code: {return_code}")
+                self._tool_panel_log(port_name, f"❌ {port_name} mid-point calibration failed - exit code: {return_code}")
+                self.status_bar.showMessage(f"{port_name} calibration failed", 3000)
 
             # 重新启动相应端口的扫描线程
-            self.add_remote_log(f"⏳ 等待端口释放...")
+            self.add_remote_log(f"⏳ Waiting for port to be released...")
             import time
             time.sleep(1.0)  # 增加等待时间确保端口完全释放
 
             if port_name == self.left_port:
                 self.left_panel.worker.start()
-                self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
+                self.add_remote_log(f"▶️ Restarted {port_name} scan thread")
             elif port_name == self.right_port:
                 self.right_panel.worker.start()
-                self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
+                self.add_remote_log(f"▶️ Restarted {port_name} scan thread")
 
         except Exception as e:
             self._tool_procs.pop(port_name, None)
-            self.add_remote_log(f"❌ {port_name}校准异常: {e}")
-            self._tool_panel_log(port_name, f"❌ {port_name}校准异常: {e}")
-            self.status_bar.showMessage(f"{port_name}校准异常: {e}", 3000)
+            self.add_remote_log(f"❌ {port_name} calibration exception: {e}")
+            self._tool_panel_log(port_name, f"❌ {port_name} calibration exception: {e}")
+            self.status_bar.showMessage(f"{port_name} calibration exception: {e}", 3000)
             # 即使出现异常也要尝试重新启动扫描线程（被新操作取代时除外）
             if not self._is_latest_tool_action(port_name, gen):
                 return
@@ -3323,27 +3324,27 @@ class EZToolUI(QMainWindow):
                 time.sleep(1.0)
                 if port_name == self.left_port:
                     self.left_panel.worker.start()
-                    self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
+                    self.add_remote_log(f"🔄 Restarting {port_name} scan thread after exception")
                 elif port_name == self.right_port:
                     self.right_panel.worker.start()
-                    self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
+                    self.add_remote_log(f"🔄 Restarting {port_name} scan thread after exception")
             except:
-                self.add_remote_log(f"⚠️ 重启{port_name}扫描线程失败")
+                self.add_remote_log(f"⚠️ Failed to restart {port_name} scan thread")
 
     def run_quick_test(self, port_name: str):
-        """快速中位测试 - 非阻塞执行"""
-        self.add_remote_log(f"🧪 开始{port_name}中位测试...")
-        self.status_bar.showMessage(f"正在执行{port_name}中位测试...", 5000)
+        """Quick mid-point test - non-blocking"""
+        self.add_remote_log(f"🧪 Starting {port_name} mid-point test...")
+        self.status_bar.showMessage(f"Running {port_name} mid-point test...", 5000)
 
         # 先终止该端口上一个仍在运行的工具进程，确保能拿到串口
         gen = self._begin_tool_action(port_name)
 
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker.is_connected:
-            self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备测试")
+            self.add_remote_log(f"⏸️ Stopped {port_name} scan thread, preparing to test")
             self.left_panel.worker.stop()
         elif port_name == self.right_port and self.right_panel.worker.is_connected:
-            self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备测试")
+            self.add_remote_log(f"⏸️ Stopped {port_name} scan thread, preparing to test")
             self.right_panel.worker.stop()
 
         # 等待端口释放
@@ -3355,10 +3356,10 @@ class EZToolUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
-        self.add_remote_log(f"📝 {port_name}测试进程已启动，请等待执行完成")
+        self.add_remote_log(f"📝 {port_name} test process started, please wait for it to finish")
 
     def _execute_quick_test(self, port_name: str, gen: int):
-        """执行快速中位测试的线程函数"""
+        """Thread function that performs quick mid-point test"""
         try:
             # 使用 -m 模块方式运行，确保能找到 scservo_sdk
             command = [sys.executable, '-m', 'src.tools.servo_center_test', port_name]
@@ -3389,14 +3390,14 @@ class EZToolUI(QMainWindow):
             return_code = process.wait()
             self._tool_procs.pop(port_name, None)
             if not self._is_latest_tool_action(port_name, gen):
-                self.add_remote_log(f"ℹ️ {port_name}中位测试已被新操作中断/取代")
+                self.add_remote_log(f"ℹ️ {port_name} mid-point test was interrupted/superseded by a new operation")
                 return
             if return_code == 0:
-                self.add_remote_log(f"✅ {port_name}中位测试完成")
-                self._tool_panel_log(port_name, f"✅ {port_name}中位测试完成（力矩保持开启，点“失能电机”可松开）")
+                self.add_remote_log(f"✅ {port_name} mid-point test complete")
+                self._tool_panel_log(port_name, f"✅ {port_name} mid-point test complete (torque stays on; click \"Disable Motor\" to release)")
             else:
-                self.add_remote_log(f"❌ {port_name}中位测试失败")
-                self._tool_panel_log(port_name, f"❌ {port_name}中位测试失败 - 退出码: {return_code}")
+                self.add_remote_log(f"❌ {port_name} mid-point test failed")
+                self._tool_panel_log(port_name, f"❌ {port_name} mid-point test failed - exit code: {return_code}")
 
             # 重新启动相应端口的扫描线程
             import time
@@ -3404,15 +3405,15 @@ class EZToolUI(QMainWindow):
 
             if port_name == self.left_port:
                 self.left_panel.worker.start()
-                self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
+                self.add_remote_log(f"▶️ Restarted {port_name} scan thread")
             elif port_name == self.right_port:
                 self.right_panel.worker.start()
-                self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
+                self.add_remote_log(f"▶️ Restarted {port_name} scan thread")
 
         except Exception as e:
             self._tool_procs.pop(port_name, None)
-            self.add_remote_log(f"❌ {port_name}测试异常: {e}")
-            self._tool_panel_log(port_name, f"❌ {port_name}测试异常: {e}")
+            self.add_remote_log(f"❌ {port_name} test exception: {e}")
+            self._tool_panel_log(port_name, f"❌ {port_name} test exception: {e}")
             # 即使出现异常也要尝试重新启动扫描线程（被新操作取代时除外）
             if not self._is_latest_tool_action(port_name, gen):
                 return
@@ -3427,9 +3428,9 @@ class EZToolUI(QMainWindow):
                 pass
 
     def run_quick_disable(self, port_name: str):
-        """快速失能电机 - 非阻塞执行"""
-        self.add_remote_log(f"⏹️ 开始{port_name}失能电机...")
-        self.status_bar.showMessage(f"正在执行{port_name}失能电机...", 5000)
+        """Quick disable motor - non-blocking"""
+        self.add_remote_log(f"⏹️ Starting {port_name} disable motor...")
+        self.status_bar.showMessage(f"Running {port_name} disable motor...", 5000)
 
         # 先终止该端口上一个仍在运行的工具进程（如中位测试），确保能拿到串口。
         # 否则 Windows 串口独占会让失能进程打不开端口，表现为"点失能没反应"
@@ -3437,10 +3438,10 @@ class EZToolUI(QMainWindow):
 
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker and self.left_panel.worker.is_connected:
-            self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备失能")
+            self.add_remote_log(f"⏸️ Stopped {port_name} scan thread, preparing to disable")
             self.left_panel.worker.stop()
         elif port_name == self.right_port and self.right_panel.worker and self.right_panel.worker.is_connected:
-            self.add_remote_log(f"⏸️ 已停止{port_name}扫描线程，准备失能")
+            self.add_remote_log(f"⏸️ Stopped {port_name} scan thread, preparing to disable")
             self.right_panel.worker.stop()
 
         # 等待端口释放
@@ -3452,15 +3453,15 @@ class EZToolUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
-        self.add_remote_log(f"📝 {port_name}失能进程已启动，请等待执行完成")
+        self.add_remote_log(f"📝 {port_name} disable process started, please wait for it to finish")
 
     def _execute_quick_disable(self, port_name: str, gen: int):
-        """执行快速失能电机的线程函数"""
+        """Thread function that performs quick disable motor"""
         try:
             # 使用 -m 模块方式运行，确保能找到 scservo_sdk
             command = [sys.executable, '-m', 'src.tools.servo_disable', port_name]
 
-            self.add_remote_log(f"🚀 启动失能进程: {' '.join(command)}")
+            self.add_remote_log(f"🚀 Starting disable process: {' '.join(command)}")
             print(f"[DEBUG DISABLE] Port name: {port_name}")
             print(f"[DEBUG DISABLE] Full command: {command}")
 
@@ -3477,7 +3478,7 @@ class EZToolUI(QMainWindow):
             self._register_tool_process(port_name, process)
 
             # 监控输出 - 显示重要信息
-            important_keywords = ["连接", "扫描", "失能", "完成", "失败", "错误", "成功", "发现", "扭矩", "旋转"]
+            important_keywords = ["Connect", "Scan", "Disable", "Done", "Failed", "Error", "Success", "Found", "Torque", "Rotate"]
             while process.poll() is None:
                 try:
                     line = process.stdout.readline()
@@ -3489,7 +3490,7 @@ class EZToolUI(QMainWindow):
                             if any(keyword in line for keyword in important_keywords):
                                 self.add_remote_log(f"[{port_name}] {line}")
                             # 失败/错误类信息同时写到面板日志，避免用户看不到原因
-                            if "❌" in line or "无法打开" in line or "错误" in line:
+                            if "❌" in line or "Can't Open" in line or "Error" in line:
                                 self._tool_panel_log(port_name, line)
                 except:
                     break
@@ -3497,16 +3498,16 @@ class EZToolUI(QMainWindow):
             return_code = process.wait()
             self._tool_procs.pop(port_name, None)
             if not self._is_latest_tool_action(port_name, gen):
-                self.add_remote_log(f"ℹ️ {port_name}失能操作已被新操作中断/取代")
+                self.add_remote_log(f"ℹ️ {port_name} disable operation was interrupted/superseded by a new operation")
                 return
             if return_code == 0:
-                self.add_remote_log(f"✅ {port_name}电机已失能，可手动旋转")
-                self._tool_panel_log(port_name, f"✅ {port_name}电机已失能，可手动旋转")
-                self.status_bar.showMessage(f"{port_name}失能完成", 3000)
+                self.add_remote_log(f"✅ {port_name} motor disabled, can be rotated by hand")
+                self._tool_panel_log(port_name, f"✅ {port_name} motor disabled, can be rotated by hand")
+                self.status_bar.showMessage(f"{port_name} disable complete", 3000)
             else:
-                self.add_remote_log(f"❌ {port_name}失能失败 - 退出码: {return_code}")
-                self._tool_panel_log(port_name, f"❌ {port_name}失能失败 - 退出码: {return_code}，请重试")
-                self.status_bar.showMessage(f"{port_name}失能失败", 3000)
+                self.add_remote_log(f"❌ {port_name} disable failed - exit code: {return_code}")
+                self._tool_panel_log(port_name, f"❌ {port_name} disable failed - exit code: {return_code}, please retry")
+                self.status_bar.showMessage(f"{port_name} disable failed", 3000)
 
             # 重新启动相应端口的扫描线程
             import time
@@ -3514,16 +3515,16 @@ class EZToolUI(QMainWindow):
 
             if port_name == self.left_port and self.left_panel.worker:
                 self.left_panel.worker.start()
-                self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
+                self.add_remote_log(f"▶️ Restarted {port_name} scan thread")
             elif port_name == self.right_port and self.right_panel.worker:
                 self.right_panel.worker.start()
-                self.add_remote_log(f"▶️ 已重新启动{port_name}扫描线程")
+                self.add_remote_log(f"▶️ Restarted {port_name} scan thread")
 
         except Exception as e:
             self._tool_procs.pop(port_name, None)
-            self.add_remote_log(f"❌ {port_name}失能异常: {e}")
-            self._tool_panel_log(port_name, f"❌ {port_name}失能异常: {e}")
-            self.status_bar.showMessage(f"{port_name}失能异常: {e}", 3000)
+            self.add_remote_log(f"❌ {port_name} disable exception: {e}")
+            self._tool_panel_log(port_name, f"❌ {port_name} disable exception: {e}")
+            self.status_bar.showMessage(f"{port_name} disable exception: {e}", 3000)
             # 即使出现异常也要尝试重新启动扫描线程（被新操作取代时除外）
             if not self._is_latest_tool_action(port_name, gen):
                 return
@@ -3532,15 +3533,15 @@ class EZToolUI(QMainWindow):
                 time.sleep(0.5)
                 if port_name == self.left_port and self.left_panel.worker:
                     self.left_panel.worker.start()
-                    self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
+                    self.add_remote_log(f"🔄 Restarting {port_name} scan thread after exception")
                 elif port_name == self.right_port and self.right_panel.worker:
                     self.right_panel.worker.start()
-                    self.add_remote_log(f"🔄 异常后重启{port_name}扫描线程")
+                    self.add_remote_log(f"🔄 Restarting {port_name} scan thread after exception")
             except:
                 pass
 
     def add_remote_log(self, message):
-        """添加遥控日志"""
+        """Add a remote-control log entry"""
         timestamp = time.strftime("%H:%M:%S")
         log_entry = f"[REMOTE] {message}"
         try:
@@ -3548,18 +3549,18 @@ class EZToolUI(QMainWindow):
         except UnicodeEncodeError:
             # GBK 控制台下 emoji 无法编码，降级为可显示字符，避免整个按钮动作被异常打断
             print(f"[REMOTE] {log_entry.encode('gbk', 'replace').decode('gbk')}")
-        self.status_bar.showMessage(f"遥控: {message}", 3000)
+        self.status_bar.showMessage(f"Remote: {message}", 3000)
 
     def on_remote_started(self):
-        """遥控启动回调"""
+        """Remote-control start callback"""
         pass
 
     def on_remote_stopped(self):
-        """遥控停止回调"""
+        """Remote-control stop callback"""
         pass
 
     def refresh_ports(self):
-        """刷新可用串口列表"""
+        """Refresh the list of available serial ports"""
         try:
             self.available_ports = get_available_ports()
             print(f"[DEBUG] Available ports: {self.available_ports}")
@@ -3613,7 +3614,7 @@ class EZToolUI(QMainWindow):
                 ):
                     self.right_port_combo.setCurrentIndex(0)
                     print(
-                        f"[DEBUG] 左右端口冲突，已禁用右端口: "
+                        f"[DEBUG] Left/right port conflict, disabled right port: "
                         f"{self.left_port_combo.currentText()}"
                     )
             finally:
@@ -3639,14 +3640,14 @@ class EZToolUI(QMainWindow):
             elif new_right != (self.right_port or ""):
                 self.on_right_port_changed(new_right)
 
-            self.status_bar.showMessage(f"串口列表已刷新 - 发现 {len(self.available_ports)} 个串口", 3000)
+            self.status_bar.showMessage(f"Serial port list refreshed - found {len(self.available_ports)} ports", 3000)
 
         except Exception as e:
             print(f"[DEBUG] Refresh ports error: {e}")
-            self.status_bar.showMessage(f"刷新串口列表失败: {e}", 3000)
+            self.status_bar.showMessage(f"Failed to refresh serial port list: {e}", 3000)
 
     def on_left_port_changed(self, port_name):
-        """左串口选择改变"""
+        """Left serial port selection changed"""
         if port_name == self.left_port or (
             not self.left_port and port_name == ServoPanel.DISABLED_PORT
         ):
@@ -3655,8 +3656,8 @@ class EZToolUI(QMainWindow):
         # 检查是否与右端口冲突
         if port_name != ServoPanel.DISABLED_PORT and port_name == self.right_port:
             QMessageBox.warning(
-                self, "端口冲突",
-                f"串口2 已经在使用 {port_name}，不能重复选择同一串口。"
+                self, "Port Conflict",
+                f"Port 2 is already using {port_name}, can't select the same port twice."
             )
             # 恢复左下拉框到之前的状态
             self.left_port_combo.blockSignals(True)
@@ -3674,11 +3675,11 @@ class EZToolUI(QMainWindow):
         if port_name == ServoPanel.DISABLED_PORT:
             self.left_port = None
             self.left_panel.update_port_name(ServoPanel.DISABLED_PORT)
-            self.left_panel.connection_status.setText("⚫ 已禁用")
+            self.left_panel.connection_status.setText("⚫ Disabled")
             self.left_panel.worker = None
             # 清空舵机列表显示，避免拔掉设备后仍显示旧数据
             self.left_panel.update_status([], False, self.left_panel.port_id)
-            self.status_bar.showMessage("串口1已禁用", 3000)
+            self.status_bar.showMessage("Port 1 Disabled", 3000)
             return
 
         self.left_port = port_name
@@ -3695,10 +3696,10 @@ class EZToolUI(QMainWindow):
         # 启动新的工作线程
         self.left_panel.worker.start()
 
-        self.status_bar.showMessage(f"串口1已切换到: {port_name}", 3000)
+        self.status_bar.showMessage(f"Port 1 switched to: {port_name}", 3000)
 
     def on_right_port_changed(self, port_name):
-        """右串口选择改变"""
+        """Right serial port selection changed"""
         if port_name == self.right_port or (
             not self.right_port and port_name == ServoPanel.DISABLED_PORT
         ):
@@ -3707,8 +3708,8 @@ class EZToolUI(QMainWindow):
         # 检查是否与左端口冲突
         if port_name != ServoPanel.DISABLED_PORT and port_name == self.left_port:
             QMessageBox.warning(
-                self, "端口冲突",
-                f"串口1 已经在使用 {port_name}，不能重复选择同一串口。"
+                self, "Port Conflict",
+                f"Port 1 is already using {port_name}, can't select the same port twice."
             )
             # 恢复右下拉框到之前的状态
             self.right_port_combo.blockSignals(True)
@@ -3726,11 +3727,11 @@ class EZToolUI(QMainWindow):
         if port_name == ServoPanel.DISABLED_PORT:
             self.right_port = None
             self.right_panel.update_port_name(ServoPanel.DISABLED_PORT)
-            self.right_panel.connection_status.setText("⚫ 已禁用")
+            self.right_panel.connection_status.setText("⚫ Disabled")
             self.right_panel.worker = None
             # 清空舵机列表显示，避免拔掉设备后仍显示旧数据
             self.right_panel.update_status([], False, self.right_panel.port_id)
-            self.status_bar.showMessage("串口2已禁用", 3000)
+            self.status_bar.showMessage("Port 2 Disabled", 3000)
             return
 
         self.right_port = port_name
@@ -3747,34 +3748,34 @@ class EZToolUI(QMainWindow):
         # 启动新的工作线程
         self.right_panel.worker.start()
 
-        self.status_bar.showMessage(f"串口2已切换到: {port_name}", 3000)
+        self.status_bar.showMessage(f"Port 2 switched to: {port_name}", 3000)
 
     def run_quick_calibration_left(self):
-        """串口1快速中位校准"""
+        """Port 1 quick mid-point calibration"""
         self.run_quick_calibration(self.left_port)
 
     def run_quick_test_left(self):
-        """串口1快速中位测试"""
+        """Port 1 quick mid-point test"""
         self.run_quick_test(self.left_port)
 
     def run_quick_disable_left(self):
-        """串口1快速失能电机"""
+        """Port 1 quick disable motor"""
         self.run_quick_disable(self.left_port)
 
     def run_quick_calibration_right(self):
-        """串口2快速中位校准"""
+        """Port 2 quick mid-point calibration"""
         self.run_quick_calibration(self.right_port)
 
     def run_quick_test_right(self):
-        """串口2快速中位测试"""
+        """Port 2 quick mid-point test"""
         self.run_quick_test(self.right_port)
 
     def run_quick_disable_right(self):
-        """串口2快速失能电机"""
+        """Port 2 quick disable motor"""
         self.run_quick_disable(self.right_port)
 
     def closeEvent(self, event):
-        """关闭事件"""
+        """Close event"""
         # 停止串口自动刷新定时器
         self.stop_port_refresh()
 
@@ -3790,7 +3791,7 @@ class EZToolUI(QMainWindow):
 
 
 def get_available_ports():
-    """获取可用串口列表 - 使用 port_utils 中已过滤的端口"""
+    """Get the list of available serial ports - uses the already-filtered ports from port_utils"""
     try:
         from src.port_utils import get_available_ports as get_ports
         ports = get_ports()
@@ -3816,7 +3817,7 @@ def get_available_ports():
 
 
 def main():
-    """主函数"""
+    """Main function"""
     import platform
     import argparse
 
@@ -3825,23 +3826,23 @@ def main():
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description='双串口工厂舵机标定工具')
-    parser.add_argument('--port1', type=str, help='指定串口1 (例如: COM1 或 /dev/ttyUSB0)')
-    parser.add_argument('--port2', type=str, help='指定串口2 (例如: COM2 或 /dev/ttyUSB1)')
-    parser.add_argument('--list-ports', action='store_true', help='列出可用串口并退出')
+    parser = argparse.ArgumentParser(description='Dual-serial-port factory servo calibration tool')
+    parser.add_argument('--port1', type=str, help='Specify serial port 1 (e.g. COM1 or /dev/ttyUSB0)')
+    parser.add_argument('--port2', type=str, help='Specify serial port 2 (e.g. COM2 or /dev/ttyUSB1)')
+    parser.add_argument('--list-ports', action='store_true', help='List available serial ports and exit')
     args = parser.parse_args()
 
     # 如果只是列出串口
     if args.list_ports:
         try:
             available_ports = get_available_ports()
-            print("可用串口列表:")
+            print("Available serial ports:")
             for i, port in enumerate(available_ports, 1):
                 print(f"  {i}. {port}")
             if not available_ports:
-                print("  未发现可用串口")
+                print("  No available serial ports found")
         except Exception as e:
-            print(f"获取串口列表失败: {e}")
+            print(f"Failed to get serial port list: {e}")
         return
 
     app = QApplication(sys.argv)
@@ -3850,7 +3851,7 @@ def main():
     import signal
 
     def handle_sigint(signum, frame):
-        print("\n收到 Ctrl+C，正在关闭...")
+        print("\nReceived Ctrl+C, shutting down...")
         app.quit()
 
     signal.signal(signal.SIGINT, handle_sigint)
@@ -3879,15 +3880,15 @@ def main():
     left_port = args.port1 if args.port1 else default_left_port
     right_port = args.port2 if args.port2 else default_right_port
 
-    print(f"启动双串口工厂舵机标定工具")
-    print(f"系统: {system}")
-    print(f"串口1: {left_port}")
-    print(f"串口2: {right_port}")
+    print(f"Starting dual-serial-port factory servo calibration tool")
+    print(f"System: {system}")
+    print(f"Port 1: {left_port}")
+    print(f"Port 2: {right_port}")
 
     # 检查可用端口
     try:
         available_ports = get_available_ports()
-        print(f"检测到的可用串口: {available_ports}")
+        print(f"Detected available serial ports: {available_ports}")
 
         # 如果没有指定命令行参数，自动选择最佳端口
         if not args.port1 or not args.port2:
@@ -3906,7 +3907,7 @@ def main():
                 # 如果找到两个首选端口，使用它们
                 if len(found_ports) >= 2 and not args.port1 and not args.port2:
                     left_port, right_port = found_ports[0], found_ports[1]
-                    print(f"使用首选端口: {left_port}, {right_port}")
+                    print(f"Using preferred ports: {left_port}, {right_port}")
                 # 如果只找到一个首选端口
                 elif len(found_ports) == 1:
                     if not args.port1:
@@ -3917,29 +3918,29 @@ def main():
                             if port != (args.port1 or found_ports[0]):
                                 right_port = port
                                 break
-                    print(f"使用混合端口配置: {left_port}, {right_port}")
+                    print(f"Using mixed port configuration: {left_port}, {right_port}")
                 # 没有找到首选端口
                 elif not args.port1 and not args.port2:
                     left_port, right_port = available_ports[0], available_ports[1]
-                    print(f"使用前两个可用端口: {left_port}, {right_port}")
+                    print(f"Using the first two available ports: {left_port}, {right_port}")
 
             elif len(available_ports) == 1:
                 if not args.port1:
                     left_port = available_ports[0]
                 if not args.port2:
                     right_port = None  # 只有一个真实串口，禁用右端口避免冲突
-                print(f"只有一个可用端口: {available_ports[0]}, 备用端口: {right_port if right_port else '禁用'}")
+                print(f"Only one port available: {available_ports[0]}, fallback port: {right_port if right_port else 'Disabled'}")
             else:
-                print("未发现可用串口，使用默认配置")
+                print("No available serial ports found, using default configuration")
 
     except Exception as e:
-        print(f"检查可用端口时出错: {e}")
+        print(f"Error checking available ports: {e}")
 
     # 创建并显示主窗口
     window = EZToolUI(left_port, right_port)
     window.show()
 
-    print("UI界面已启动")
+    print("UI started")
     sys.exit(app.exec())
 
 
