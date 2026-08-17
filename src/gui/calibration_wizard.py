@@ -48,6 +48,18 @@ try:
 except ImportError:
     setup_light_theme = None
 
+try:
+    from src.i18n import tr, set_lang, lang_from_argv
+except ImportError:
+    def tr(text):
+        return text
+
+    def set_lang(lang):
+        return lang
+
+    def lang_from_argv(argv):
+        return None
+
 
 BAUD_RATE = 1000000
 TORQUE_ENABLE_ADDR = 40
@@ -116,11 +128,11 @@ class PositionReader(QObject):
                     else:
                         self.error_counts[servo_id] += 1
                         if self.error_counts[servo_id] <= 5:
-                            print(f"[DEBUG] 读取 ID{servo_id} 失败: result={result}, error={error}")
+                            print(tr("[DEBUG] 读取 ID{} 失败: result={}, error={}").format(servo_id, result, error))
                 except Exception as e:
                     self.error_counts[servo_id] += 1
                     if self.error_counts[servo_id] <= 5:
-                        print(f"[DEBUG] 读取 ID{servo_id} 异常: {e}")
+                        print(tr("[DEBUG] 读取 ID{} 异常: {}").format(servo_id, e))
             self.positions_updated.emit(positions)
             time.sleep(0.05)  # 20Hz
 
@@ -150,9 +162,9 @@ class CalibrationWizard(QDialog):
         self.port_name = port_name
         self.arm_type = arm_type
         self.preload_file = preload_file
-        title = f"LeRobot 校准向导 - {port_name}"
+        title = tr("LeRobot 校准向导 - {}").format(port_name)
         if preload_file:
-            title += " (基于现有文件)"
+            title += tr(" (基于现有文件)")
         self.setWindowTitle(title)
         self.setMinimumSize(900, 650)
         self.setFont(get_chinese_font(10))
@@ -180,13 +192,13 @@ class CalibrationWizard(QDialog):
         main_layout.setContentsMargins(20, 20, 20, 20)
 
         # 标题
-        title = QLabel(f"🦾 LeRobot 校准向导 - {'领导臂' if self.arm_type == 'leader' else '从动臂'}")
+        title = QLabel(tr("🦾 LeRobot 校准向导 - {}").format(tr("领导臂") if self.arm_type == 'leader' else tr("从动臂")))
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;")
         title.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title)
 
         # 状态信息
-        self.status_label = QLabel(f"串口: {self.port_name} | 状态: 初始化中...")
+        self.status_label = QLabel(tr("串口: {} | 状态: 初始化中...").format(self.port_name))
         self.status_label.setStyleSheet("font-size: 12px; color: #6c757d;")
         main_layout.addWidget(self.status_label)
 
@@ -195,12 +207,12 @@ class CalibrationWizard(QDialog):
         content_layout.setSpacing(15)
 
         # 左侧：关节数据表格
-        table_group = QGroupBox("📋 关节校准数据")
+        table_group = QGroupBox(tr("📋 关节校准数据"))
         table_layout = QVBoxLayout(table_group)
 
         self.joints_table = QTableWidget(6, 6)
         self.joints_table.setHorizontalHeaderLabels([
-            "ID", "当前位置", "中位值", "最小值", "最大值", "状态"
+            "ID", tr("当前位置"), tr("中位值"), tr("最小值"), tr("最大值"), tr("状态")
         ])
         header = self.joints_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Stretch)
@@ -216,14 +228,14 @@ class CalibrationWizard(QDialog):
         for i, servo_id in enumerate(range(1, 7)):
             joint_name = ID_TO_JOINT.get(servo_id, f"joint_{servo_id}")
             # 校准向导界面使用纯中文名称，去掉英文对照
-            display_name = JOINT_NAME_MAP.get(joint_name, joint_name).split(" / ")[0]
+            display_name = tr(JOINT_NAME_MAP.get(joint_name, joint_name).split(" / ")[0])
 
             self.joints_table.setItem(i, 0, self._create_item(str(servo_id), align=Qt.AlignCenter))
             self.joints_table.setItem(i, 1, self._create_item("--", align=Qt.AlignCenter))
             self.joints_table.setItem(i, 2, self._create_item("--", align=Qt.AlignCenter))
             self.joints_table.setItem(i, 3, self._create_item("--", align=Qt.AlignCenter))
             self.joints_table.setItem(i, 4, self._create_item("--", align=Qt.AlignCenter))
-            self.joints_table.setItem(i, 5, self._create_item("未校准", color="#dc3545"))
+            self.joints_table.setItem(i, 5, self._create_item(tr("未校准"), color="#dc3545"))
 
             self.joints.append({
                 "id": servo_id,
@@ -243,17 +255,17 @@ class CalibrationWizard(QDialog):
         content_layout.addWidget(table_group, stretch=2)
 
         # 右侧：操作面板
-        control_group = QGroupBox("🎮 操作面板")
+        control_group = QGroupBox(tr("🎮 操作面板"))
         control_layout = QVBoxLayout(control_group)
         control_layout.setSpacing(15)
 
         # 当前关节显示
-        self.current_joint_label = QLabel("当前关节: ID1 - 肩部平转")
+        self.current_joint_label = QLabel(tr("当前关节: ID1 - 肩部平转"))
         self.current_joint_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #495057;")
         control_layout.addWidget(self.current_joint_label)
 
         # 当前位置大字显示
-        self.current_pos_label = QLabel("当前位置: --")
+        self.current_pos_label = QLabel(tr("当前位置: --"))
         self.current_pos_label.setStyleSheet(
             "font-size: 36px; font-weight: bold; color: #007bff; "
             "background-color: #e9ecef; padding: 15px; border-radius: 8px;"
@@ -264,8 +276,7 @@ class CalibrationWizard(QDialog):
 
         # 步骤说明
         self.instruction_label = QLabel(
-            "步骤 1/2：请将当前关节移动到运动范围的中间位置，\n"
-            "然后点击【记录中位值】按钮。"
+            tr("步骤 1/2：请将当前关节移动到运动范围的中间位置，\n然后点击【记录中位值】按钮。")
         )
         self.instruction_label.setStyleSheet(
             "font-size: 13px; color: #1565c0; background-color: #e3f2fd; "
@@ -276,7 +287,7 @@ class CalibrationWizard(QDialog):
         control_layout.addWidget(self.instruction_label)
 
         # 记录中位按钮
-        self.record_home_btn = QPushButton("✅ 记录中位值")
+        self.record_home_btn = QPushButton(tr("✅ 记录中位值"))
         self.record_home_btn.setStyleSheet(self._button_style("#28a745"))
         self.record_home_btn.setMinimumHeight(45)
         self.record_home_btn.clicked.connect(self.record_homing)
@@ -284,12 +295,12 @@ class CalibrationWizard(QDialog):
 
         # 记录范围按钮
         self.record_range_layout = QHBoxLayout()
-        self.start_range_btn = QPushButton("▶ 开始记录范围")
+        self.start_range_btn = QPushButton(tr("▶ 开始记录范围"))
         self.start_range_btn.setStyleSheet(self._button_style("#007bff"))
         self.start_range_btn.setMinimumHeight(45)
         self.start_range_btn.clicked.connect(self.start_range_recording)
 
-        self.stop_range_btn = QPushButton("⏹ 停止记录范围")
+        self.stop_range_btn = QPushButton(tr("⏹ 停止记录范围"))
         self.stop_range_btn.setStyleSheet(self._button_style("#dc3545"))
         self.stop_range_btn.setMinimumHeight(45)
         self.stop_range_btn.setEnabled(False)
@@ -301,11 +312,11 @@ class CalibrationWizard(QDialog):
 
         # 导航按钮
         nav_layout = QHBoxLayout()
-        self.prev_btn = QPushButton("◀ 上一个关节")
+        self.prev_btn = QPushButton(tr("◀ 上一个关节"))
         self.prev_btn.setStyleSheet(self._button_style("#6c757d"))
         self.prev_btn.clicked.connect(self.prev_joint)
 
-        self.next_btn = QPushButton("下一个关节 ▶")
+        self.next_btn = QPushButton(tr("下一个关节 ▶"))
         self.next_btn.setStyleSheet(self._button_style("#17a2b8"))
         self.next_btn.clicked.connect(self.next_joint)
 
@@ -316,7 +327,7 @@ class CalibrationWizard(QDialog):
         control_layout.addStretch()
 
         # 保存设置
-        save_group = QGroupBox("💾 保存设置")
+        save_group = QGroupBox(tr("💾 保存设置"))
         save_group.setMinimumHeight(120)
         save_group.setStyleSheet("""
             QGroupBox {
@@ -365,12 +376,12 @@ class CalibrationWizard(QDialog):
         """)
         default_id = "my_awesome_leader_arm" if self.arm_type == "leader" else "my_awesome_follower_arm"
         self.id_input.setText(default_id)
-        save_layout.addRow("校准文件 ID:", self.id_input)
+        save_layout.addRow(tr("校准文件 ID:"), self.id_input)
 
         control_layout.addWidget(save_group)
 
         # 保存按钮
-        self.save_btn = QPushButton("💾 保存校准文件")
+        self.save_btn = QPushButton(tr("💾 保存校准文件"))
         self.save_btn.setStyleSheet(self._button_style("#6f42c1"))
         self.save_btn.setMinimumHeight(55)
         self.save_btn.setFont(get_chinese_font(12, bold=True))
@@ -382,14 +393,14 @@ class CalibrationWizard(QDialog):
 
         # 底部按钮
         bottom_layout = QHBoxLayout()
-        self.disconnect_btn = QPushButton("🔌 断开连接")
+        self.disconnect_btn = QPushButton(tr("🔌 断开连接"))
         self.disconnect_btn.setStyleSheet(self._button_style("#6c757d"))
         self.disconnect_btn.clicked.connect(self.disconnect_and_close)
         bottom_layout.addWidget(self.disconnect_btn)
 
         bottom_layout.addStretch()
 
-        self.close_btn = QPushButton("关闭")
+        self.close_btn = QPushButton(tr("关闭"))
         self.close_btn.setStyleSheet(self._button_style("#6c757d"))
         self.close_btn.clicked.connect(self.close)
         bottom_layout.addWidget(self.close_btn)
@@ -455,10 +466,10 @@ class CalibrationWizard(QDialog):
         try:
             self.port_handler = PortHandler(self.port_name)
             if not self.port_handler.openPort():
-                QMessageBox.critical(self, "错误", f"无法打开串口: {self.port_name}")
+                QMessageBox.critical(self, tr("错误"), tr("无法打开串口: {}").format(self.port_name))
                 return False
             if not self.port_handler.setBaudRate(BAUD_RATE):
-                QMessageBox.critical(self, "错误", "无法设置波特率")
+                QMessageBox.critical(self, tr("错误"), tr("无法设置波特率"))
                 self.port_handler.closePort()
                 return False
 
@@ -467,14 +478,14 @@ class CalibrationWizard(QDialog):
             # 扫描舵机
             found_servos = self.scan_servos()
             if not found_servos:
-                QMessageBox.critical(self, "错误", "未发现舵机")
+                QMessageBox.critical(self, tr("错误"), tr("未发现舵机"))
                 self.port_handler.closePort()
                 return False
 
             # 过滤出 1-6
             self.servo_ids = [sid for sid in found_servos if sid in ID_TO_JOINT]
             if not self.servo_ids:
-                QMessageBox.critical(self, "错误", "未发现 SO-10x 标准关节（ID 1-6）")
+                QMessageBox.critical(self, tr("错误"), tr("未发现 SO-10x 标准关节（ID 1-6）"))
                 self.port_handler.closePort()
                 return False
 
@@ -486,9 +497,8 @@ class CalibrationWizard(QDialog):
                 missing_names = [f"ID{sid}" for sid in sorted(missing_ids)]
                 QMessageBox.warning(
                     self,
-                    "警告",
-                    f"以下标准关节未被发现：{', '.join(missing_names)}\n"
-                    f"这些关节将无法校准，请检查连接。"
+                    tr("警告"),
+                    tr("以下标准关节未被发现：{}\n这些关节将无法校准，请检查连接。").format(', '.join(missing_names))
                 )
                 # 标记缺失关节为未连接
                 for sid in missing_ids:
@@ -504,7 +514,7 @@ class CalibrationWizard(QDialog):
             self.reader_thread.start()
 
             self.status_label.setText(
-                f"串口: {self.port_name} | 已连接 | 发现舵机: {self.servo_ids}"
+                tr("串口: {} | 已连接 | 发现舵机: {}").format(self.port_name, self.servo_ids)
             )
 
             # 如果指定了预加载文件，读取现有校准数据
@@ -514,7 +524,7 @@ class CalibrationWizard(QDialog):
             return True
 
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"连接失败: {e}")
+            QMessageBox.critical(self, tr("错误"), tr("连接失败: {}").format(e))
             return False
 
     def preload_calibration_data(self):
@@ -534,15 +544,13 @@ class CalibrationWizard(QDialog):
                     loaded_count += 1
 
             self.status_label.setText(
-                f"串口: {self.port_name} | 已连接 | 已加载 {loaded_count} 个关节数据 | "
-                f"选择关节后可重新记录以覆盖"
+                tr("串口: {} | 已连接 | 已加载 {} 个关节数据 | 选择关节后可重新记录以覆盖").format(self.port_name, loaded_count)
             )
             print(
-                f"[DEBUG] 已加载现有校准文件: {self.preload_file}, "
-                f"预填 {loaded_count} 个关节数据"
+                tr("[DEBUG] 已加载现有校准文件: {}, 预填 {} 个关节数据").format(self.preload_file, loaded_count)
             )
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"加载校准文件失败: {e}")
+            QMessageBox.warning(self, tr("警告"), tr("加载校准文件失败: {}").format(e))
 
     def scan_servos(self) -> List[int]:
         """扫描舵机"""
@@ -573,7 +581,7 @@ class CalibrationWizard(QDialog):
             if joint["range_max"] is None or pos > joint["range_max"]:
                 joint["range_max"] = pos
             if joint["range_min"] != old_min or joint["range_max"] != old_max:
-                print(f"[DEBUG] 记录范围更新: ID{current_id}, pos={pos}, range=[{joint['range_min']}, {joint['range_max']}]")
+                print(tr("[DEBUG] 记录范围更新: ID{}, pos={}, range=[{}, {}]").format(current_id, pos, joint['range_min'], joint['range_max']))
 
         for servo_id, pos in positions.items():
             index = servo_id - 1
@@ -601,16 +609,16 @@ class CalibrationWizard(QDialog):
             # 状态
             status_item = self.joints_table.item(i, 5)
             if joint["status"] == "done":
-                status_item.setText("✅ 完成")
+                status_item.setText(tr("✅ 完成"))
                 status_item.setForeground(QColor("#28a745"))
             elif joint["status"] == "homing_done":
-                status_item.setText("📝 已记录中位")
+                status_item.setText(tr("📝 已记录中位"))
                 status_item.setForeground(QColor("#007bff"))
             elif joint["status"] == "disconnected":
-                status_item.setText("❌ 未连接")
+                status_item.setText(tr("❌ 未连接"))
                 status_item.setForeground(QColor("#6c757d"))
             else:
-                status_item.setText("⏳ 未校准")
+                status_item.setText(tr("⏳ 未校准"))
                 status_item.setForeground(QColor("#dc3545"))
 
         # 高亮当前行
@@ -632,7 +640,7 @@ class CalibrationWizard(QDialog):
         current_joint = self.joints[self.current_joint_index]
         current_pos = current_joint["current_pos"]
         self.current_pos_label.setText(
-            f"当前位置: {current_pos if current_pos is not None else '--'}"
+            tr("当前位置: {}").format(current_pos if current_pos is not None else '--')
         )
 
         # 记录中时的视觉反馈
@@ -658,9 +666,7 @@ class CalibrationWizard(QDialog):
         # 记录范围进行中：除【停止记录范围】外，其他操作按钮全部禁用
         if self.is_recording:
             self.instruction_label.setText(
-                f"⏺️ 正在记录 {name} 的运动范围...\n"
-                f"请将关节缓慢移动到极限位置，\n"
-                f"然后点击【停止记录范围】。"
+                tr("⏺️ 正在记录 {} 的运动范围...\n请将关节缓慢移动到极限位置，\n然后点击【停止记录范围】。").format(name)
             )
             self.record_home_btn.setEnabled(False)
             self.start_range_btn.setEnabled(False)
@@ -668,48 +674,40 @@ class CalibrationWizard(QDialog):
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
             self.save_btn.setEnabled(False)
-            self.current_joint_label.setText(f"当前关节: ID{joint['id']} - {name}")
+            self.current_joint_label.setText(tr("当前关节: ID{} - {}").format(joint['id'], name))
             return
 
         if joint["status"] == "disconnected":
             self.instruction_label.setText(
-                f"⚠️ 当前关节 {name} 未连接。\n"
-                f"请检查舵机 ID{joint['id']} 的电源和接线，\n"
-                f"然后关闭向导重新打开。"
+                tr("⚠️ 当前关节 {} 未连接。\n请检查舵机 ID{} 的电源和接线，\n然后关闭向导重新打开。").format(name, joint['id'])
             )
             self.record_home_btn.setEnabled(False)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(False)
         elif joint["name"] in CONTINUOUS_JOINTS:
             self.instruction_label.setText(
-                f"当前关节: {name}\n"
-                f"这是连续旋转关节（wrist_roll），只需记录中位值，\n"
-                f"范围固定为 [0, 4095]。"
+                tr("当前关节: {}\n这是连续旋转关节（wrist_roll），只需记录中位值，\n范围固定为 [0, 4095]。").format(name)
             )
             self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(False)
         elif joint["status"] == "pending":
             self.instruction_label.setText(
-                f"步骤 1/2：请将 {name} 移动到运动范围的中间位置，\n"
-                f"然后点击【记录中位值】。"
+                tr("步骤 1/2：请将 {} 移动到运动范围的中间位置，\n然后点击【记录中位值】。").format(name)
             )
             self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(False)
             self.stop_range_btn.setEnabled(False)
         elif joint["status"] == "homing_done":
             self.instruction_label.setText(
-                f"步骤 2/2：{name} 中位已记录为 {joint['homing_offset']}。\n"
-                f"现在请缓慢移动该关节经过整个运动范围，\n"
-                f"点击【开始记录范围】，移动完成后点击【停止记录范围】。"
+                tr("步骤 2/2：{} 中位已记录为 {}。\n现在请缓慢移动该关节经过整个运动范围，\n点击【开始记录范围】，移动完成后点击【停止记录范围】。").format(name, joint['homing_offset'])
             )
             self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(True)
             self.stop_range_btn.setEnabled(False)
         elif joint["status"] == "done":
             self.instruction_label.setText(
-                f"✅ {name} 校准完成！\n"
-                f"中位: {joint['homing_offset']} | 范围: [{joint['range_min']}, {joint['range_max']}]"
+                tr("✅ {} 校准完成！\n中位: {} | 范围: [{}, {}]").format(name, joint['homing_offset'], joint['range_min'], joint['range_max'])
             )
             self.record_home_btn.setEnabled(True)
             self.start_range_btn.setEnabled(True)
@@ -722,7 +720,7 @@ class CalibrationWizard(QDialog):
 
         # 更新当前关节标签
         self.current_joint_label.setText(
-            f"当前关节: ID{joint['id']} - {name}"
+            tr("当前关节: ID{} - {}").format(joint['id'], name)
         )
 
     def on_selection_changed(self):
@@ -741,9 +739,9 @@ class CalibrationWizard(QDialog):
             if result == COMM_SUCCESS:
                 return pos
             else:
-                print(f"[DEBUG] 直接读取 ID{servo_id} 失败: result={result}, error={error}")
+                print(tr("[DEBUG] 直接读取 ID{} 失败: result={}, error={}").format(servo_id, result, error))
         except Exception as e:
-            print(f"[DEBUG] 直接读取 ID{servo_id} 异常: {e}")
+            print(tr("[DEBUG] 直接读取 ID{} 异常: {}").format(servo_id, e))
         return None
 
     def record_homing(self):
@@ -751,7 +749,7 @@ class CalibrationWizard(QDialog):
         joint = self.joints[self.current_joint_index]
 
         if joint["status"] == "disconnected":
-            QMessageBox.warning(self, "警告", f"舵机 ID{joint['id']} 未连接，无法记录")
+            QMessageBox.warning(self, tr("警告"), tr("舵机 ID{} 未连接，无法记录").format(joint['id']))
             return
 
         current_pos = joint["current_pos"]
@@ -765,12 +763,8 @@ class CalibrationWizard(QDialog):
         if current_pos is None:
             QMessageBox.warning(
                 self,
-                "警告",
-                f"当前无法读取舵机 ID{joint['id']} 的位置。\n"
-                f"可能原因：\n"
-                f"1. 该舵机未连接或没有上电\n"
-                f"2. 串口被其他程序占用\n"
-                f"3. 后台读取线程尚未收到数据（请等待几秒后重试）"
+                tr("警告"),
+                tr("当前无法读取舵机 ID{} 的位置。\n可能原因：\n1. 该舵机未连接或没有上电\n2. 串口被其他程序占用\n3. 后台读取线程尚未收到数据（请等待几秒后重试）").format(joint['id'])
             )
             return
 
@@ -780,10 +774,10 @@ class CalibrationWizard(QDialog):
             joint["range_min"] = 0
             joint["range_max"] = 4095
             joint["status"] = "done"
-            self.status_label.setText(f"已记录 {joint['display_name']} 中位和范围（连续旋转）")
+            self.status_label.setText(tr("已记录 {} 中位和范围（连续旋转）").format(joint['display_name']))
         else:
             joint["status"] = "homing_done"
-            self.status_label.setText(f"已记录 {joint['display_name']} 中位值: {current_pos}")
+            self.status_label.setText(tr("已记录 {} 中位值: {}").format(joint['display_name'], current_pos))
 
         # 自动下一个
         self.next_joint()
@@ -809,14 +803,14 @@ class CalibrationWizard(QDialog):
             joint["range_max"] = pos
 
         if joint["range_min"] != old_min or joint["range_max"] != old_max:
-            print(f"[DEBUG] 范围记录更新: ID{joint['id']}, pos={pos}, range=[{joint['range_min']}, {joint['range_max']}]")
+            print(tr("[DEBUG] 范围记录更新: ID{}, pos={}, range=[{}, {}]").format(joint['id'], pos, joint['range_min'], joint['range_max']))
 
     def start_range_recording(self):
         """开始记录范围"""
         joint = self.joints[self.current_joint_index]
 
         if joint["status"] == "disconnected":
-            QMessageBox.warning(self, "警告", f"舵机 ID{joint['id']} 未连接，无法记录范围")
+            QMessageBox.warning(self, tr("警告"), tr("舵机 ID{} 未连接，无法记录范围").format(joint['id']))
             return
 
         current_pos = joint["current_pos"]
@@ -830,9 +824,8 @@ class CalibrationWizard(QDialog):
         if current_pos is None:
             QMessageBox.warning(
                 self,
-                "警告",
-                f"当前无法读取舵机 ID{joint['id']} 的位置。\n"
-                f"请检查连接后重试。"
+                tr("警告"),
+                tr("当前无法读取舵机 ID{} 的位置。\n请检查连接后重试。").format(joint['id'])
             )
             return
 
@@ -842,8 +835,8 @@ class CalibrationWizard(QDialog):
 
         self.start_range_btn.setEnabled(False)
         self.stop_range_btn.setEnabled(True)
-        self.status_label.setText(f"正在记录 {joint['display_name']} 的运动范围...")
-        print(f"[DEBUG] 开始记录范围: {joint['display_name']} (ID{joint['id']}), 初始值={current_pos}")
+        self.status_label.setText(tr("正在记录 {} 的运动范围...").format(joint['display_name']))
+        print(tr("[DEBUG] 开始记录范围: {} (ID{}), 初始值={}").format(joint['display_name'], joint['id'], current_pos))
 
         # 启动高频读取定时器，确保能捕捉到运动范围的极值
         self.range_recording_timer.start(30)  # 约 33Hz
@@ -863,10 +856,9 @@ class CalibrationWizard(QDialog):
         self.start_range_btn.setEnabled(True)
         self.stop_range_btn.setEnabled(False)
         self.status_label.setText(
-            f"{joint['display_name']} 范围记录完成: "
-            f"[{joint['range_min']}, {joint['range_max']}]"
+            tr("{} 范围记录完成: [{}, {}]").format(joint['display_name'], joint['range_min'], joint['range_max'])
         )
-        print(f"[DEBUG] 停止记录范围: {joint['display_name']} (ID{joint['id']}), 范围=[{joint['range_min']}, {joint['range_max']}]")
+        print(tr("[DEBUG] 停止记录范围: {} (ID{}), 范围=[{}, {}]").format(joint['display_name'], joint['id'], joint['range_min'], joint['range_max']))
 
         # 停止高频读取定时器
         self.range_recording_timer.stop()
@@ -900,10 +892,8 @@ class CalibrationWizard(QDialog):
         if incomplete:
             reply = QMessageBox.question(
                 self,
-                "确认保存",
-                f"以下关节尚未完成校准:\n{', '.join(incomplete)}\n\n"
-                f"未完成关节将使用默认值（中位=2048, 范围=[0,4095]）。\n"
-                f"是否继续保存？",
+                tr("确认保存"),
+                tr("以下关节尚未完成校准:\n{}\n\n未完成关节将使用默认值（中位=2048, 范围=[0,4095]）。\n是否继续保存？").format(', '.join(incomplete)),
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
@@ -941,14 +931,13 @@ class CalibrationWizard(QDialog):
 
             QMessageBox.information(
                 self,
-                "保存成功",
-                f"校准文件已保存:\n{save_path}\n\n"
-                f"可以在 LeRobot 中使用 ID: {calib_id}"
+                tr("保存成功"),
+                tr("校准文件已保存:\n{}\n\n可以在 LeRobot 中使用 ID: {}").format(save_path, calib_id)
             )
-            self.status_label.setText(f"校准文件已保存: {save_path}")
+            self.status_label.setText(tr("校准文件已保存: {}").format(save_path))
 
         except Exception as e:
-            QMessageBox.critical(self, "保存失败", f"保存校准文件失败: {e}")
+            QMessageBox.critical(self, tr("保存失败"), tr("保存校准文件失败: {}").format(e))
 
     def disconnect_and_close(self):
         """断开连接并关闭"""
@@ -986,6 +975,14 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     if setup_light_theme:
         setup_light_theme(app)
+
+    # 语言选择：--lang 指定时直接使用，否则弹出选择对话框
+    lang = lang_from_argv(sys.argv)
+    if lang is None:
+        from src.gui.language_dialog import choose_language
+        lang = choose_language()
+    set_lang(lang)
+
     wizard = CalibrationWizard("/dev/ttyACM0", "follower")
     wizard.show()
     sys.exit(app.exec())
