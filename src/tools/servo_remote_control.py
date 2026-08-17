@@ -30,11 +30,17 @@ sys.path.append('../..')
 sys.path.append('../../scservo_sdk')
 
 try:
+    from src.i18n import tr
+except ImportError:
+    def tr(text):
+        return text
+
+try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
-    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print(tr("❌ 错误: 无法导入 SCServo SDK: {}").format(e))
     print("   Error: Cannot import SCServo SDK")
     sys.exit(1)
 
@@ -42,7 +48,7 @@ except ImportError as e:
 try:
     from src.port_utils import select_port_interactive, get_available_ports, list_ports_for_user
 except ImportError:
-    print("❌ 错误: 未找到 port_utils")
+    print(tr("❌ 错误: 未找到 port_utils"))
     print("   Error: port_utils not found")
     sys.exit(1)
 
@@ -73,46 +79,46 @@ class SyncRemoteControl:
     def connect(self) -> bool:
         """连接两个串口"""
         print(f"\n{'='*55}")
-        print(f"🎮 舵机同步遥控系统 / Servo Sync Remote Control")
+        print(tr("🎮 舵机同步遥控系统 / Servo Sync Remote Control"))
         print(f"{'='*55}")
-        print(f"主控端口 / Master Port (只读/Read):  {self.read_port}")
-        print(f"从控端口 / Slave Port (控制/Control): {self.control_port}")
+        print(tr("主控端口 / Master Port (只读/Read):  {}").format(self.read_port))
+        print(tr("从控端口 / Slave Port (控制/Control): {}").format(self.control_port))
         print(f"{'='*55}\n")
 
         # 连接主控端口（只读）
-        print(f"📡 连接主控端口 / Connecting master port...")
+        print(tr("📡 连接主控端口 / Connecting master port..."))
         try:
             self.read_handler = PortHandler(self.read_port)
             if not self.read_handler.openPort():
-                print(f"❌ 无法打开 / Cannot open {self.read_port}")
+                print(tr("❌ 无法打开 / Cannot open {}").format(self.read_port))
                 return False
             if not self.read_handler.setBaudRate(BAUD_RATE):
-                print(f"❌ 无法设置波特率 / Cannot set baud rate")
+                print(tr("❌ 无法设置波特率 / Cannot set baud rate"))
                 self.read_handler.closePort()
                 return False
             self.read_servo = sms_sts(self.read_handler)
-            print(f"✅ 主控端口已连接 / Master port connected\n")
+            print(tr("✅ 主控端口已连接 / Master port connected\n"))
         except Exception as e:
-            print(f"❌ 主控端口异常 / Master port error: {e}")
+            print(tr("❌ 主控端口异常 / Master port error: {}").format(e))
             return False
 
         # 连接从控端口（控制）
-        print(f"📡 连接从控端口 / Connecting control port...")
+        print(tr("📡 连接从控端口 / Connecting control port..."))
         try:
             self.control_handler = PortHandler(self.control_port)
             if not self.control_handler.openPort():
-                print(f"❌ 无法打开 / Cannot open {self.control_port}")
+                print(tr("❌ 无法打开 / Cannot open {}").format(self.control_port))
                 self.read_handler.closePort()
                 return False
             if not self.control_handler.setBaudRate(BAUD_RATE):
-                print(f"❌ 无法设置波特率 / Cannot set baud rate")
+                print(tr("❌ 无法设置波特率 / Cannot set baud rate"))
                 self.control_handler.closePort()
                 self.read_handler.closePort()
                 return False
             self.control_servo = sms_sts(self.control_handler)
-            print(f"✅ 从控端口已连接 / Control port connected\n")
+            print(tr("✅ 从控端口已连接 / Control port connected\n"))
         except Exception as e:
-            print(f"❌ 从控端口异常 / Control port error: {e}")
+            print(tr("❌ 从控端口异常 / Control port error: {}").format(e))
             self.read_handler.closePort()
             return False
 
@@ -120,7 +126,7 @@ class SyncRemoteControl:
 
     def scan_servos(self) -> tuple:
         """扫描两个端口上的舵机"""
-        print("📡 扫描舵机 / Scanning servos...\n")
+        print(tr("📡 扫描舵机 / Scanning servos...\n"))
         master_found = []
         slave_found = []
 
@@ -129,25 +135,25 @@ class SyncRemoteControl:
             model_number, result, error = self.read_servo.ping(servo_id)
             if result == COMM_SUCCESS:
                 master_found.append(servo_id)
-                print(f"  📖 主控 / Master: ID{servo_id} (型号/Model: {model_number})")
+                print(tr("  📖 主控 / Master: ID{} (型号/Model: {})").format(servo_id, model_number))
 
         # 扫描从控端口
         for servo_id in range(1, 21):
             model_number, result, error = self.control_servo.ping(servo_id)
             if result == COMM_SUCCESS:
                 slave_found.append(servo_id)
-                print(f"  🎮 从控 / Slave:  ID{servo_id} (型号/Model: {model_number})")
+                print(tr("  🎮 从控 / Slave:  ID{} (型号/Model: {})").format(servo_id, model_number))
 
         print()
-        print(f"📊 扫描结果 / Scan Results:")
-        print(f"   主控端口 / Master: {master_found}")
-        print(f"   从控端口 / Slave:  {slave_found}")
+        print(tr("📊 扫描结果 / Scan Results:"))
+        print(tr("   主控端口 / Master: {}").format(master_found))
+        print(tr("   从控端口 / Slave:  {}").format(slave_found))
 
         return master_found, slave_found
 
     def enable_control_torque(self, servo_ids: list) -> int:
         """启动力矩"""
-        print(f"\n⚡ 启动力矩 / Enabling torque...")
+        print(tr("\n⚡ 启动力矩 / Enabling torque..."))
         enabled_count = 0
 
         for servo_id in servo_ids:
@@ -156,20 +162,20 @@ class SyncRemoteControl:
                 enabled_count += 1
             time.sleep(0.05)
 
-        print(f"✅ {enabled_count}/{len(servo_ids)} 个舵机力矩已启动 / {enabled_count}/{len(servo_ids)} servos enabled\n")
+        print(tr("✅ {}/{} 个舵机力矩已启动 / {}/{} servos enabled\n").format(enabled_count, len(servo_ids), enabled_count, len(servo_ids)))
         return enabled_count
 
     def run_sync_control(self, servo_ids: list):
         """运行同步控制循环"""
         print("=" * 50)
-        print("🚀 启动同步控制 / Starting sync control")
+        print(tr("🚀 启动同步控制 / Starting sync control"))
         print("=" * 50)
-        print(f"⏱️ 更新间隔 / Update interval: {UPDATE_INTERVAL*1000:.0f}ms ({1/UPDATE_INTERVAL:.0f}Hz)")
-        print(f"📊 显示频率 / Display freq: 每{DISPLAY_INTERVAL}秒")
-        print(f"⏹️ 按 Ctrl+C 停止 / Press Ctrl+C to stop")
+        print(tr("⏱️ 更新间隔 / Update interval: {:.0f}ms ({:.0f}Hz)").format(UPDATE_INTERVAL*1000, 1/UPDATE_INTERVAL))
+        print(tr("📊 显示频率 / Display freq: 每{}秒").format(DISPLAY_INTERVAL))
+        print(tr("⏹️ 按 Ctrl+C 停止 / Press Ctrl+C to stop"))
         print("=" * 50)
-        print(f"📖 主控端口 / Master: {self.read_port} (只读角度)")
-        print(f"🎮 从控端口 / Slave:  {self.control_port} (控制舵机)")
+        print(tr("📖 主控端口 / Master: {} (只读角度)").format(self.read_port))
+        print(tr("🎮 从控端口 / Slave:  {} (控制舵机)").format(self.control_port))
         print("=" * 50)
         print()
 
@@ -200,8 +206,7 @@ class SyncRemoteControl:
                 current_time = time.time()
                 if current_time - last_display_time >= DISPLAY_INTERVAL:
                     fps = loop_count / DISPLAY_INTERVAL
-                    print(f"📊 [{time.strftime('%H:%M:%S')}] 同步频率/Sync: {fps:.1f} Hz | "
-                          f"活跃舵机/Active: {sync_count} 个/servos")
+                    print(tr("📊 [{}] 同步频率/Sync: {:.1f} Hz | 活跃舵机/Active: {} 个/servos").format(time.strftime('%H:%M:%S'), fps, sync_count))
                     last_display_time = current_time
                     loop_count = 0
 
@@ -211,25 +216,25 @@ class SyncRemoteControl:
                 time.sleep(sleep_time)
 
         except KeyboardInterrupt:
-            print("\n\n⏹️ 用户停止 / User stopped")
+            print(tr("\n\n⏹️ 用户停止 / User stopped"))
 
     def disconnect(self):
         """断开连接"""
         print("\n" + "=" * 50)
-        print("🔌 断开连接 / Disconnecting...")
+        print(tr("🔌 断开连接 / Disconnecting..."))
         print("=" * 50)
 
         try:
             if self.read_handler:
                 self.read_handler.closePort()
-                print(f"✅ 主控端口已断开 / Master disconnected")
+                print(tr("✅ 主控端口已断开 / Master disconnected"))
         except:
             pass
 
         try:
             if self.control_handler:
                 self.control_handler.closePort()
-                print(f"✅ 从控端口已断开 / Slave disconnected")
+                print(tr("✅ 从控端口已断开 / Slave disconnected"))
         except:
             pass
 
@@ -238,16 +243,16 @@ def main():
     """主函数"""
     # 解析参数
     if len(sys.argv) > 1 and sys.argv[1] == "--list":
-        print("=== 可用串口 / Available Serial Ports ===")
+        print(tr("=== 可用串口 / Available Serial Ports ==="))
         print(list_ports_for_user())
         return
 
     # 获取可用端口
     ports = get_available_ports()
     if len(ports) < 2:
-        print("❌ 错误: 需要至少2个串口设备 / Error: Need at least 2 serial ports")
-        print(f"   当前可用 / Current available: {len(ports)} 个")
-        print("\n可用端口列表 / Available ports:")
+        print(tr("❌ 错误: 需要至少2个串口设备 / Error: Need at least 2 serial ports"))
+        print(tr("   当前可用 / Current available: {} 个").format(len(ports)))
+        print(tr("\n可用端口列表 / Available ports:"))
         print(list_ports_for_user())
         sys.exit(1)
 
@@ -257,7 +262,7 @@ def main():
 
     # 命令行参数解析
     parser = argparse.ArgumentParser(
-        description='舵机同步遥控系统 / Servo Sync Remote Control',
+        description=tr('舵机同步遥控系统 / Servo Sync Remote Control'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例 / Examples:
@@ -268,31 +273,31 @@ def main():
         """
     )
     parser.add_argument('--read-port', default=default_read,
-                       help=f'主控端口/读取角度 (默认: {default_read})')
+                       help=tr('主控端口/读取角度 (默认: {})').format(default_read))
     parser.add_argument('--control-port', default=default_control,
-                       help=f'从控端口/控制舵机 (默认: {default_control})')
+                       help=tr('从控端口/控制舵机 (默认: {})').format(default_control))
 
     # 如果没有提供参数，交互式选择
     if len(sys.argv) == 1:
         print(f"\n{'='*55}")
-        print(f"🎮 舵机同步遥控系统 / Servo Sync Remote Control")
+        print(tr("🎮 舵机同步遥控系统 / Servo Sync Remote Control"))
         print(f"{'='*55}")
         print()
-        print(f"检测到 {len(ports)} 个可用串口 / Detected {len(ports)} available serial ports")
+        print(tr("检测到 {} 个可用串口 / Detected {} available serial ports").format(len(ports), len(ports)))
         print()
         print(list_ports_for_user())
         print()
 
         # 选择主控端口
-        read_port = select_port_interactive("选择主控端口 (读取角度) / Select master port (read)")
+        read_port = select_port_interactive(tr("选择主控端口 (读取角度) / Select master port (read)"))
         if not read_port:
-            print("❌ 未选择端口 / No port selected")
+            print(tr("❌ 未选择端口 / No port selected"))
             sys.exit(1)
 
         # 选择从控端口
-        control_port = select_port_interactive("选择从控端口 (控制舵机) / Select control port (write)")
+        control_port = select_port_interactive(tr("选择从控端口 (控制舵机) / Select control port (write)"))
         if not control_port:
-            print("❌ 未选择端口 / No port selected")
+            print(tr("❌ 未选择端口 / No port selected"))
             sys.exit(1)
     else:
         args = parser.parse_args()
@@ -309,26 +314,26 @@ def main():
         master_found, slave_found = controller.scan_servos()
 
         if not master_found:
-            print(f"\n❌ 主控端口未发现舵机 / No servos on master port")
+            print(tr("\n❌ 主控端口未发现舵机 / No servos on master port"))
             sys.exit(1)
 
         # 取交集，只同步两个端口都存在的舵机
         sync_servos = list(set(master_found) & set(slave_found))
 
         if not sync_servos:
-            print(f"\n❌ 两个端口没有相同ID的舵机 / No matching servo IDs on both ports")
-            print(f"   主控端口 / Master: {master_found}")
-            print(f"   从控端口 / Slave:  {slave_found}")
+            print(tr("\n❌ 两个端口没有相同ID的舵机 / No matching servo IDs on both ports"))
+            print(tr("   主控端口 / Master: {}").format(master_found))
+            print(tr("   从控端口 / Slave:  {}").format(slave_found))
             sys.exit(1)
 
-        print(f"\n✅ 将同步 {len(sync_servos)} 个舵机 / Will sync {len(sync_servos)} servos: {sync_servos}")
+        print(tr("\n✅ 将同步 {} 个舵机 / Will sync {} servos: {}").format(len(sync_servos), len(sync_servos), sync_servos))
         print()
 
         controller.enable_control_torque(sync_servos)
         controller.run_sync_control(sync_servos)
 
     except Exception as e:
-        print(f"\n❌ 运行异常 / Runtime error: {e}")
+        print(tr("\n❌ 运行异常 / Runtime error: {}").format(e))
     finally:
         controller.disconnect()
 

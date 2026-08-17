@@ -20,11 +20,17 @@ sys.path.append('../..')
 sys.path.append('../../scservo_sdk')
 
 try:
+    from src.i18n import tr
+except ImportError:
+    def tr(text):
+        return text
+
+try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
-    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print(tr("❌ 错误: 无法导入 SCServo SDK: {}").format(e))
     print("   Error: Cannot import SCServo SDK")
     sys.exit(1)
 
@@ -32,7 +38,7 @@ except ImportError as e:
 try:
     from src.port_utils import select_port_interactive, get_available_ports, list_ports_for_user
 except ImportError:
-    print("❌ 错误: 未找到 port_utils")
+    print(tr("❌ 错误: 未找到 port_utils"))
     print("   Error: port_utils not found")
     sys.exit(1)
 
@@ -68,42 +74,42 @@ def quick_calibration(port_name: str) -> bool:
         bool: 校准是否成功
     """
     print(f"\n{'='*50}")
-    print(f"⚡ 舵机快速校准工具 / Servo Quick Calibration")
+    print(tr("⚡ 舵机快速校准工具 / Servo Quick Calibration"))
     print(f"{'='*50}")
-    print(f"端口 / Port: {port_name}")
+    print(tr("端口 / Port: {}").format(port_name))
     print(f"{'='*50}\n")
 
     # 初始化端口
     try:
         port_handler = PortHandler(port_name)
         if not port_handler.openPort():
-            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            print(tr("❌ 无法打开串口 / Cannot open {}").format(port_name))
             return False
         if not port_handler.setBaudRate(BAUD_RATE):
-            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            print(tr("❌ 无法设置波特率 / Cannot set baud rate"))
             port_handler.closePort()
             return False
 
         servo_handler = sms_sts(port_handler)
 
         # 扫描舵机
-        print("📡 扫描舵机 / Scanning servos...")
+        print(tr("📡 扫描舵机 / Scanning servos..."))
         found_servos = scan_servos(servo_handler)
 
         if not found_servos:
-            print("❌ 未发现舵机 / No servos found")
+            print(tr("❌ 未发现舵机 / No servos found"))
             port_handler.closePort()
             return False
 
-        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
+        print(tr("✅ 发现 {} 个舵机 / Found {} servo(s): {}\n").format(len(found_servos), len(found_servos), found_servos))
 
     except Exception as e:
-        print(f"❌ 初始化异常 / Init error: {e}")
+        print(tr("❌ 初始化异常 / Init error: {}").format(e))
         return False
 
     try:
         # Step 1: 失能所有舵机
-        print("⏹️ Step 1: 失能舵机 / Disabling servos...")
+        print(tr("⏹️ Step 1: 失能舵机 / Disabling servos..."))
         print("-" * 50)
         disabled_count = 0
         failed_disable = []
@@ -116,18 +122,17 @@ def quick_calibration(port_name: str) -> bool:
                 failed_disable.append(servo_id)
             time.sleep(0.05)
 
-        print(f"✅ {disabled_count}/{len(found_servos)} 个舵机已失能 / {disabled_count}/{len(found_servos)} servos disabled")
+        print(tr("✅ {}/{} 个舵机已失能 / {}/{} servos disabled").format(disabled_count, len(found_servos), disabled_count, len(found_servos)))
         if failed_disable:
-            print(f"   失败 / Failed: {failed_disable}")
+            print(tr("   失败 / Failed: {}").format(failed_disable))
         print()
 
         time.sleep(1)  # 等待舵机稳定
 
         # Step 2: 校准中位
-        print("🔧 Step 2: 校准中位（当前位置→2048）/ Calibrating middle (current→2048)")
+        print(tr("🔧 Step 2: 校准中位（当前位置→2048）/ Calibrating middle (current→2048)"))
         print("-" * 50)
-        print("💡 确保舵机已手动调整到期望的中位位置")
-        print("   Make sure servos are manually adjusted to desired center position")
+        print(tr("💡 确保舵机已手动调整到期望的中位位置\n   Make sure servos are manually adjusted to desired center position"))
         print("-" * 50)
 
         calibrated_count = 0
@@ -139,7 +144,7 @@ def quick_calibration(port_name: str) -> bool:
             # 解锁 EEPROM
             result, error = servo_handler.unLockEprom(servo_id)
             if result != COMM_SUCCESS:
-                print(f"❌ EEPROM解锁失败 / Unlock failed")
+                print(tr("❌ EEPROM解锁失败 / Unlock failed"))
                 failed_calibrate.append(servo_id)
                 continue
             time.sleep(0.05)
@@ -147,7 +152,7 @@ def quick_calibration(port_name: str) -> bool:
             # 发送校准命令（写128到地址40）
             result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_CALIBRATE_MIDDLE)
             if result != COMM_SUCCESS:
-                print(f"❌ 校准失败 / Calibration failed")
+                print(tr("❌ 校准失败 / Calibration failed"))
                 servo_handler.LockEprom(servo_id)
                 failed_calibrate.append(servo_id)
                 continue
@@ -157,28 +162,28 @@ def quick_calibration(port_name: str) -> bool:
             servo_handler.LockEprom(servo_id)
 
             calibrated_count += 1
-            print("✅ 成功 / Success")
+            print(tr("✅ 成功 / Success"))
 
         print()
         print("=" * 50)
 
         if calibrated_count == len(found_servos):
-            print(f"✅ 全部成功! / All Success! {calibrated_count}/{len(found_servos)} 个舵机已校准")
+            print(tr("✅ 全部成功! / All Success! {}/{} 个舵机已校准").format(calibrated_count, len(found_servos)))
             print(f"   {calibrated_count}/{len(found_servos)} servos calibrated")
         else:
-            print(f"⚠️ 部分成功 / Partial: {calibrated_count}/{len(found_servos)} 个舵机已校准")
+            print(tr("⚠️ 部分成功 / Partial: {}/{} 个舵机已校准").format(calibrated_count, len(found_servos)))
             if failed_calibrate:
-                print(f"   失败的舵机 / Failed servos: {failed_calibrate}")
+                print(tr("   失败的舵机 / Failed servos: {}").format(failed_calibrate))
 
         print("=" * 50)
         print()
-        print("✅ 快速校准完成 / Quick calibration complete!")
+        print(tr("✅ 快速校准完成 / Quick calibration complete!"))
         print("=" * 50)
 
         return calibrated_count > 0
 
     except Exception as e:
-        print(f"\n❌ 校准异常 / Calibration error: {e}")
+        print(tr("\n❌ 校准异常 / Calibration error: {}").format(e))
         return False
     finally:
         try:
@@ -192,17 +197,17 @@ def main():
     # 解析参数
     if len(sys.argv) > 1:
         if sys.argv[1] == "--list":
-            print("=== 可用串口 / Available Serial Ports ===")
+            print(tr("=== 可用串口 / Available Serial Ports ==="))
             print(list_ports_for_user())
             return
         else:
             port_name = sys.argv[1]
-            print(f"🔌 使用指定端口 / Using specified port: {port_name}")
+            print(tr("🔌 使用指定端口 / Using specified port: {}").format(port_name))
     else:
         # 交互式选择端口
-        port_name = select_port_interactive("选择校准串口 / Select port to calibrate")
+        port_name = select_port_interactive(tr("选择校准串口 / Select port to calibrate"))
         if not port_name:
-            print("❌ 未选择端口 / No port selected")
+            print(tr("❌ 未选择端口 / No port selected"))
             sys.exit(1)
 
     # 执行快速校准

@@ -27,6 +27,12 @@ if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
     except Exception:
         pass
 
+try:
+    from src.i18n import tr
+except ImportError:
+    def tr(text):
+        return text
+
 # 引入 SDK
 sys.path.append('../..')
 sys.path.append('../../scservo_sdk')
@@ -36,21 +42,21 @@ try:
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
-    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print(tr("❌ 错误: 无法导入 SCServo SDK: {}").format(e))
     sys.exit(1)
 
 # 引入端口工具
 try:
     from src.port_utils import select_port_interactive, list_ports_for_user
 except ImportError:
-    print("❌ 错误: 未找到 port_utils")
+    print(tr("❌ 错误: 未找到 port_utils"))
     sys.exit(1)
 
 # 引入校准文件管理器
 try:
     from src.calibration_manager import CalibrationManager, JOINT_NAME_MAP
 except ImportError:
-    print("❌ 错误: 未找到 calibration_manager")
+    print(tr("❌ 错误: 未找到 calibration_manager"))
     sys.exit(1)
 
 
@@ -66,7 +72,7 @@ def load_calibration(calibration_path: str) -> dict:
     manager = CalibrationManager()
     data = manager.load_calibration_file(calibration_path)
     if data is None:
-        print(f"❌ 无法读取校准文件: {calibration_path}")
+        print(tr("❌ 无法读取校准文件: {}").format(calibration_path))
         sys.exit(1)
     return data
 
@@ -91,7 +97,7 @@ def compute_middle_positions(data: dict, mode: str = "zero") -> dict:
             range_max = joint_data.get("range_max", 4095)
             target = (range_min + range_max) // 2
         else:
-            raise ValueError(f"未知模式: {mode}, 请选择 'zero' 或 'range'")
+            raise ValueError(tr("未知模式: {}, 请选择 'zero' 或 'range'").format(mode))
 
         # 确保在有效范围内
         target = max(0, min(4095, target))
@@ -123,18 +129,18 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
         是否成功
     """
     print(f"\n{'='*60}")
-    print(f"🎯 校准文件中位运行工具 / Calibration Middle Position Runner")
+    print(tr("🎯 校准文件中位运行工具 / Calibration Middle Position Runner"))
     print(f"{'='*60}")
-    print(f"校准文件 / Calibration: {calibration_path}")
-    print(f"串口 / Port: {port_name}")
-    print(f"中位模式 / Mode: {'校准零点 (homing_offset)' if mode == 'zero' else '范围中点 (range midpoint)'}")
+    print(tr("校准文件 / Calibration: {}").format(calibration_path))
+    print(tr("串口 / Port: {}").format(port_name))
+    print(tr("中位模式 / Mode: {}").format(tr("校准零点 (homing_offset)") if mode == 'zero' else tr("范围中点 (range midpoint)")))
     print(f"{'='*60}\n")
 
     # 加载校准文件
     data = load_calibration(calibration_path)
     middle_positions = compute_middle_positions(data, mode)
 
-    print("📋 校准文件关节信息 / Joint info from calibration:")
+    print(tr("📋 校准文件关节信息 / Joint info from calibration:"))
     print("-" * 60)
     for joint_name, joint_data in data.items():
         display_name = JOINT_NAME_MAP.get(joint_name, joint_name)
@@ -145,35 +151,35 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
         target = middle_positions[joint_name]
         print(f"  {display_name}")
         print(f"    ID: {servo_id}, Homing Offset: {homing_offset}, Range: [{range_min}, {range_max}]")
-        print(f"    → 目标中位 / Target: {target}")
+        print(tr("    → 目标中位 / Target: {}").format(target))
     print("-" * 60)
 
     # 初始化串口
     try:
         port_handler = PortHandler(port_name)
         if not port_handler.openPort():
-            print(f"❌ 无法打开串口 / Cannot open port: {port_name}")
+            print(tr("❌ 无法打开串口 / Cannot open port: {}").format(port_name))
             return False
         if not port_handler.setBaudRate(BAUD_RATE):
-            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            print(tr("❌ 无法设置波特率 / Cannot set baud rate"))
             port_handler.closePort()
             return False
 
         servo_handler = sms_sts(port_handler)
-        print(f"✅ 串口已连接 / Port connected: {port_name}\n")
+        print(tr("✅ 串口已连接 / Port connected: {}\n").format(port_name))
 
     except Exception as e:
-        print(f"❌ 串口初始化失败 / Port init failed: {e}")
+        print(tr("❌ 串口初始化失败 / Port init failed: {}").format(e))
         return False
 
     # 扫描舵机
-    print("📡 扫描舵机 / Scanning servos...")
+    print(tr("📡 扫描舵机 / Scanning servos..."))
     found_servos = scan_servos(servo_handler)
     if not found_servos:
-        print("❌ 未发现舵机 / No servos found")
+        print(tr("❌ 未发现舵机 / No servos found"))
         port_handler.closePort()
         return False
-    print(f"✅ 发现舵机 / Found servos: {found_servos}\n")
+    print(tr("✅ 发现舵机 / Found servos: {}\n").format(found_servos))
 
     # 检查校准文件中的舵机是否都在线
     missing_ids = []
@@ -183,14 +189,14 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
             missing_ids.append((joint_name, servo_id))
 
     if missing_ids:
-        print("⚠️ 以下校准文件中的舵机未在线 / Following servos from calibration not found:")
+        print(tr("⚠️ 以下校准文件中的舵机未在线 / Following servos from calibration not found:"))
         for joint_name, servo_id in missing_ids:
             print(f"  {joint_name}: ID {servo_id}")
         print()
 
     try:
         # 启动力矩
-        print("⚡ 启动力矩 / Enabling torque...")
+        print(tr("⚡ 启动力矩 / Enabling torque..."))
         enabled_count = 0
         for joint_name, joint_data in data.items():
             servo_id = joint_data.get("id")
@@ -199,11 +205,11 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
                 if result == COMM_SUCCESS:
                     enabled_count += 1
                 time.sleep(0.05)
-        print(f"✅ {enabled_count} 个舵机力矩已启动 / {enabled_count} servos enabled\n")
+        print(tr("✅ {} 个舵机力矩已启动 / {} servos enabled\n").format(enabled_count, enabled_count))
         time.sleep(0.5)
 
         # 移动到中位
-        print("🎯 移动到中位 / Moving to middle positions...")
+        print(tr("🎯 移动到中位 / Moving to middle positions..."))
         print("-" * 60)
         moved_count = 0
         for joint_name, joint_data in data.items():
@@ -216,16 +222,16 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
                     print(f"  ✅ ID{servo_id} ({display_name}) → {target}")
                     moved_count += 1
                 else:
-                    print(f"  ❌ ID{servo_id} ({display_name}) → 发送失败")
+                    print(f"  ❌ ID{servo_id} ({display_name}) → {tr('发送失败')}")
                 time.sleep(0.05)
         print("-" * 60)
-        print(f"✅ {moved_count} 个舵机已发送中位命令 / {moved_count} servos commanded\n")
+        print(tr("✅ {} 个舵机已发送中位命令 / {} servos commanded\n").format(moved_count, moved_count))
 
-        print("⏳ 等待2秒稳定... / Waiting 2 seconds to stabilize...")
+        print(tr("⏳ 等待2秒稳定... / Waiting 2 seconds to stabilize..."))
         time.sleep(2)
 
         # 读取最终位置
-        print("\n📍 最终位置 / Final positions:")
+        print(tr("\n📍 最终位置 / Final positions:"))
         print("-" * 60)
         for joint_name, joint_data in data.items():
             servo_id = joint_data.get("id")
@@ -235,24 +241,24 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
                 display_name = JOINT_NAME_MAP.get(joint_name, joint_name)
                 if result == COMM_SUCCESS:
                     diff = position - target
-                    print(f"  ID{servo_id} ({display_name}): 当前 {position:4d} | 目标 {target:4d} | 偏差 {diff:+4d}")
+                    print(f"  ID{servo_id} ({display_name}): {tr('当前')} {position:4d} | {tr('目标')} {target:4d} | {tr('偏差')} {diff:+4d}")
                 else:
-                    print(f"  ID{servo_id} ({display_name}): 读取失败")
+                    print(f"  ID{servo_id} ({display_name}): {tr('读取失败')}")
                 time.sleep(0.05)
         print("-" * 60)
 
-        print("\n✅ 中位运行完成 / Middle position running complete!")
-        print("   按 Ctrl+C 退出 / Press Ctrl+C to exit")
+        print(tr("\n✅ 中位运行完成 / Middle position running complete!"))
+        print(tr("   按 Ctrl+C 退出 / Press Ctrl+C to exit"))
 
         # 保持力矩开启
         while True:
             time.sleep(1)
 
     except KeyboardInterrupt:
-        print("\n\n⏹️ 用户中断 / User interrupted")
+        print(tr("\n\n⏹️ 用户中断 / User interrupted"))
         return True
     except Exception as e:
-        print(f"\n❌ 运行异常 / Runtime error: {e}")
+        print(tr("\n❌ 运行异常 / Runtime error: {}").format(e))
         return False
     finally:
         try:
@@ -263,39 +269,39 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='根据 LeRobot 校准文件运行舵机到中位',
+        description=tr('根据 LeRobot 校准文件运行舵机到中位'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=tr("""
 中位模式说明 / Mode explanation:
   zero  : 使用 homing_offset 作为中位（LeRobot 的零点）
   range : 使用 (range_min + range_max) / 2 作为中位（物理范围中点）
-        """
+        """)
     )
-    parser.add_argument('calibration_file', help='LeRobot 校准文件路径')
-    parser.add_argument('port', nargs='?', help='串口名称，不指定则交互式选择')
+    parser.add_argument('calibration_file', help=tr('LeRobot 校准文件路径'))
+    parser.add_argument('port', nargs='?', help=tr('串口名称，不指定则交互式选择'))
     parser.add_argument('--mode', choices=['zero', 'range'], default='zero',
-                       help='中位计算模式（默认: zero）')
-    parser.add_argument('--list', action='store_true', help='列出可用串口')
+                       help=tr('中位计算模式（默认: zero）'))
+    parser.add_argument('--list', action='store_true', help=tr('列出可用串口'))
 
     args = parser.parse_args()
 
     if args.list:
-        print("=== 可用串口 / Available Serial Ports ===")
+        print(tr("=== 可用串口 / Available Serial Ports ==="))
         print(list_ports_for_user())
         return
 
     calibration_path = args.calibration_file
     if not os.path.exists(calibration_path):
-        print(f"❌ 校准文件不存在 / Calibration file not found: {calibration_path}")
+        print(tr("❌ 校准文件不存在 / Calibration file not found: {}").format(calibration_path))
         sys.exit(1)
 
     if args.port:
         port_name = args.port
-        print(f"🔌 使用指定端口 / Using specified port: {port_name}")
+        print(tr("🔌 使用指定端口 / Using specified port: {}").format(port_name))
     else:
-        port_name = select_port_interactive("选择要运行中位的串口 / Select port")
+        port_name = select_port_interactive(tr("选择要运行中位的串口 / Select port"))
         if not port_name:
-            print("❌ 未选择端口 / No port selected")
+            print(tr("❌ 未选择端口 / No port selected"))
             sys.exit(1)
 
     success = run_to_middle(port_name, calibration_path, args.mode)

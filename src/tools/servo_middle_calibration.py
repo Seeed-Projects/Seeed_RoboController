@@ -20,11 +20,17 @@ sys.path.append('../..')
 sys.path.append('../../scservo_sdk')
 
 try:
+    from src.i18n import tr
+except ImportError:
+    def tr(text):
+        return text
+
+try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
-    print(f"❌ 错误: 无法导入 SCServo SDK: {e}")
+    print(tr("❌ 错误: 无法导入 SCServo SDK: {}").format(e))
     print("   Error: Cannot import SCServo SDK")
     sys.exit(1)
 
@@ -32,7 +38,7 @@ except ImportError as e:
 try:
     from src.port_utils import select_port_interactive, get_available_ports, list_ports_for_user
 except ImportError:
-    print("❌ 错误: 未找到 port_utils")
+    print(tr("❌ 错误: 未找到 port_utils"))
     print("   Error: port_utils not found")
     sys.exit(1)
 
@@ -118,14 +124,14 @@ def calibrate_middle_offset(servo_handler, servo_id: int) -> bool:
         # 1. 解锁 EEPROM
         result, error = servo_handler.unLockEprom(servo_id)
         if result != COMM_SUCCESS:
-            print(f"    ❌ EEPROM解锁失败: {error}")
+            print(tr("    ❌ EEPROM解锁失败: {}").format(error))
             return False
         time.sleep(0.1)
 
         # 2. 发送校准命令（写128到地址40）
         result, error = servo_handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, SMS_STS_CALIBRATE_MIDDLE)
         if result != COMM_SUCCESS:
-            print(f"    ❌ 校准命令失败: {error}")
+            print(tr("    ❌ 校准命令失败: {}").format(error))
             servo_handler.LockEprom(servo_id)
             return False
         time.sleep(0.1)
@@ -133,12 +139,12 @@ def calibrate_middle_offset(servo_handler, servo_id: int) -> bool:
         # 3. 重新锁定 EEPROM
         result, error = servo_handler.LockEprom(servo_id)
         if result != COMM_SUCCESS:
-            print(f"    ⚠️ EEPROM重新锁定失败: {error}")
+            print(tr("    ⚠️ EEPROM重新锁定失败: {}").format(error))
 
         return True
 
     except Exception as e:
-        print(f"    ❌ 校准异常: {e}")
+        print(tr("    ❌ 校准异常: {}").format(e))
         return False
 
 
@@ -239,13 +245,15 @@ def read_all_servo_info(servo_handler, servo_list: list) -> list:
     return info_list
 
 
-def print_servo_info_table(info_list: list, title: str = "舵机状态 / Servo Status"):
+def print_servo_info_table(info_list: list, title: str = None):
     """打印舵机状态信息表格"""
+    if title is None:
+        title = tr("舵机状态 / Servo Status")
     print(f"\n📊 {title}")
     print("-" * 100)
     header = (
-        f"{'ID':>4}  {'型号':>6}  {'位置':>6}  {'角度':>7}  "
-        f"{'速度':>6}  {'负载':>6}  {'电压':>6}  {'温度':>5}  {'电流':>6}  {'运行':>4}"
+        f"{'ID':>4}  {tr('型号'):>6}  {tr('位置'):>6}  {tr('角度'):>7}  "
+        f"{tr('速度'):>6}  {tr('负载'):>6}  {tr('电压'):>6}  {tr('温度'):>5}  {tr('电流'):>6}  {tr('运行'):>4}"
     )
     print(header)
     print("-" * 100)
@@ -269,7 +277,7 @@ def print_servo_info_table(info_list: list, title: str = "舵机状态 / Servo S
             f"{fmt(info['voltage'], '>5.1f', 'V')}  "
             f"{fmt(info['temperature'], '>4', '°C')}  "
             f"{fmt(info['current'], '>6')}  "
-            f"{'是' if info['moving'] else ('否' if info['moving'] is not None else 'N/A'):>4}"
+            f"{tr('是') if info['moving'] else (tr('否') if info['moving'] is not None else 'N/A'):>4}"
         )
         print(row)
 
@@ -289,16 +297,16 @@ def check_servo_health(info_list: list):
             v_min, v_max = get_voltage_range(voltage)
             if voltage < v_min or voltage > v_max:
                 warnings.append(
-                    f"  ⚠️ ID{sid} 电压异常: {voltage:.1f}V (安全范围 {v_min:.1f}V ~ {v_max:.1f}V)"
+                    tr("  ⚠️ ID{} 电压异常: {:.1f}V (安全范围 {:.1f}V ~ {:.1f}V)").format(sid, voltage, v_min, v_max)
                 )
 
         if temperature is not None and temperature > SAFE_TEMPERATURE_MAX:
             warnings.append(
-                f"  ⚠️ ID{sid} 温度过高: {temperature}°C (建议 < {SAFE_TEMPERATURE_MAX:.0f}°C)"
+                tr("  ⚠️ ID{} 温度过高: {}°C (建议 < {:.0f}°C)").format(sid, temperature, SAFE_TEMPERATURE_MAX)
             )
 
     if warnings:
-        print("\n🚨 健康警告 / Health Warnings:")
+        print(tr("\n🚨 健康警告 / Health Warnings:"))
         for warning in warnings:
             print(warning)
         print()
@@ -309,136 +317,135 @@ def interactive_calibration(port_name: str) -> bool:
     交互式中位校准 - 逐步引导用户完成校准
     """
     print(f"\n{'='*55}")
-    print(f"🔧 舵机中位校准工具 / Servo Middle Calibration Tool")
+    print(tr("🔧 舵机中位校准工具 / Servo Middle Calibration Tool"))
     print(f"{'='*55}")
-    print(f"端口 / Port: {port_name}")
+    print(tr("端口 / Port: {}").format(port_name))
     print(f"{'='*55}\n")
 
     # 初始化端口
     try:
         port_handler = PortHandler(port_name)
         if not port_handler.openPort():
-            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            print(tr("❌ 无法打开串口 / Cannot open {}").format(port_name))
             return False
         if not port_handler.setBaudRate(BAUD_RATE):
-            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            print(tr("❌ 无法设置波特率 / Cannot set baud rate"))
             port_handler.closePort()
             return False
 
         servo_handler = sms_sts(port_handler)
 
         # Step 1: 扫描舵机
-        print("📡 Step 1: 扫描舵机 / Scanning servos...")
+        print(tr("📡 Step 1: 扫描舵机 / Scanning servos..."))
         found_servos = scan_servos(servo_handler)
 
         if not found_servos:
-            print("❌ 未发现舵机 / No servos found")
+            print(tr("❌ 未发现舵机 / No servos found"))
             port_handler.closePort()
             return False
 
-        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
+        print(tr("✅ 发现 {} 个舵机 / Found {} servo(s): {}\n").format(len(found_servos), len(found_servos), found_servos))
 
         # 显示初始状态
         initial_info = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(initial_info, "初始状态 / Initial Status")
+        print_servo_info_table(initial_info, tr("初始状态 / Initial Status"))
         check_servo_health(initial_info)
 
     except Exception as e:
-        print(f"❌ 初始化异常 / Init error: {e}")
+        print(tr("❌ 初始化异常 / Init error: {}").format(e))
         return False
 
     try:
         # Step 2: 失能舵机
-        print("⏹️ Step 2: 失能舵机（可手动旋转）/ Disable servos (free to rotate)")
+        print(tr("⏹️ Step 2: 失能舵机（可手动旋转）/ Disable servos (free to rotate)"))
         try:
-            confirm = input("是否失能舵机？(y/n): ").strip().lower()
+            confirm = input(tr("是否失能舵机？(y/n): ")).strip().lower()
             if confirm in ['y', 'yes']:
                 count = disable_servos(servo_handler, found_servos)
-                print(f"✅ {count}/{len(found_servos)} 个舵机已失能 / {count}/{len(found_servos)} servos disabled\n")
+                print(tr("✅ {}/{} 个舵机已失能 / {}/{} servos disabled\n").format(count, len(found_servos), count, len(found_servos)))
                 time.sleep(1)
             else:
-                print("⏭️ 跳过失能 / Skipped\n")
+                print(tr("⏭️ 跳过失能 / Skipped\n"))
         except (EOFError, KeyboardInterrupt):
-            print("⏭️ 跳过失能 / Skipped\n")
+            print(tr("⏭️ 跳过失能 / Skipped\n"))
 
         # Step 3: 读取当前位置与状态
-        print("📍 Step 3: 读取当前位置与状态 / Reading current positions and status...")
+        print(tr("📍 Step 3: 读取当前位置与状态 / Reading current positions and status..."))
         info_before = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(info_before, "校准前状态 / Status Before Calibration")
+        print_servo_info_table(info_before, tr("校准前状态 / Status Before Calibration"))
         check_servo_health(info_before)
         positions_before = {info["id"]: info["position"] for info in info_before if info["position"] is not None}
 
         # Step 4: 提示用户手动调整位置
         print("=" * 50)
-        print("📋 Step 4: 手动调整舵机位置")
-        print("   Manually adjust servos to desired center position")
+        print(tr("📋 Step 4: 手动调整舵机位置\n   Manually adjust servos to desired center position"))
         print("=" * 50)
         try:
-            input("调整完成后按回车继续 / Press Enter when ready...\n")
+            input(tr("调整完成后按回车继续 / Press Enter when ready...\n"))
         except (EOFError, KeyboardInterrupt):
-            print("⏭️ 用户取消 / User cancelled")
+            print(tr("⏭️ 用户取消 / User cancelled"))
             return False
 
         # Step 5: 校准中位
-        print("🔧 Step 5: 校准中位（将当前位置设为2048）/ Calibrate middle (set current as 2048)")
+        print(tr("🔧 Step 5: 校准中位（将当前位置设为2048）/ Calibrate middle (set current as 2048)"))
         print("-" * 50)
 
         try:
-            confirm = input("确认校准？(y/n): ").strip().lower()
+            confirm = input(tr("确认校准？(y/n): ")).strip().lower()
             if confirm not in ['y', 'yes']:
-                print("⏭️ 取消校准 / Calibration cancelled")
+                print(tr("⏭️ 取消校准 / Calibration cancelled"))
                 return False
         except (EOFError, KeyboardInterrupt):
-            print("⏭️ 取消校准 / Calibration cancelled")
+            print(tr("⏭️ 取消校准 / Calibration cancelled"))
             return False
 
-        print("正在校准... / Calibrating...")
+        print(tr("正在校准... / Calibrating..."))
         success_count = 0
         for servo_id in found_servos:
             print(f"  ID{servo_id}...", end=" ")
             if calibrate_middle_offset(servo_handler, servo_id):
                 success_count += 1
-                print("✅ 成功 / Success")
+                print(tr("✅ 成功 / Success"))
             else:
-                print("❌ 失败 / Failed")
+                print(tr("❌ 失败 / Failed"))
             time.sleep(0.1)
 
-        print(f"\n✅ {success_count}/{len(found_servos)} 个舵机校准完成 / {success_count}/{len(found_servos)} servos calibrated\n")
+        print(tr("\n✅ {}/{} 个舵机校准完成 / {}/{} servos calibrated\n").format(success_count, len(found_servos), success_count, len(found_servos)))
         time.sleep(1)
 
         # 校准后状态
         info_after_cal = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(info_after_cal, "校准后状态 / Status After Calibration")
+        print_servo_info_table(info_after_cal, tr("校准后状态 / Status After Calibration"))
         check_servo_health(info_after_cal)
 
         # Step 6: 移动到中位测试
-        print("🎯 Step 6: 移动到中位测试 / Move to center for testing")
+        print(tr("🎯 Step 6: 移动到中位测试 / Move to center for testing"))
         print("-" * 50)
 
         try:
-            confirm = input("是否移动舵机到中位测试？(y/n): ").strip().lower()
+            confirm = input(tr("是否移动舵机到中位测试？(y/n): ")).strip().lower()
             if confirm not in ['y', 'yes']:
-                print("⏭️ 跳过测试 / Skipped testing")
+                print(tr("⏭️ 跳过测试 / Skipped testing"))
             else:
-                print("正在移动... / Moving...")
+                print(tr("正在移动... / Moving..."))
                 moved_count = 0
                 for servo_id in found_servos:
                     if center_servo(servo_handler, servo_id):
                         moved_count += 1
                     time.sleep(0.1)
 
-                print(f"✅ {moved_count}/{len(found_servos)} 个舵机已移动到中位 / {moved_count}/{len(found_servos)} servos moved to center")
-                print("\n⏳ 等待3秒... / Waiting 3 seconds...")
+                print(tr("✅ {}/{} 个舵机已移动到中位 / {}/{} servos moved to center").format(moved_count, len(found_servos), moved_count, len(found_servos)))
+                print(tr("\n⏳ 等待3秒... / Waiting 3 seconds..."))
                 time.sleep(3)
 
                 # 读取最终位置与状态
-                print("\n📍 最终位置与状态 / Final positions and status:")
+                print(tr("\n📍 最终位置与状态 / Final positions and status:"))
                 info_after = read_all_servo_info(servo_handler, found_servos)
-                print_servo_info_table(info_after, "最终状态 / Final Status")
+                print_servo_info_table(info_after, tr("最终状态 / Final Status"))
                 check_servo_health(info_after)
 
                 # 打印位移摘要
-                print("\n📏 位移摘要 / Movement Summary:")
+                print(tr("\n📏 位移摘要 / Movement Summary:"))
                 print("-" * 60)
                 for info in info_after:
                     servo_id = info["id"]
@@ -446,25 +453,24 @@ def interactive_calibration(port_name: str) -> bool:
                         movement = info["position"] - positions_before[servo_id]
                         movement_deg = position_to_degrees(movement)
                         final_deg = position_to_degrees(info["position"])
-                        print(f"  ID{servo_id}: {info['position']:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+                        print(f"  ID{servo_id}: {info['position']:4d} ({final_deg:6.1f}°) [{tr('位移/movement')}: {movement:+4d} ({movement_deg:+5.1f}°)]")
                 print("-" * 60)
 
         except (EOFError, KeyboardInterrupt):
-            print("⏭️ 跳过测试 / Skipped testing")
+            print(tr("⏭️ 跳过测试 / Skipped testing"))
 
         # 完成
         print()
         print("=" * 50)
-        print("✅ 校准流程完成 / Calibration process complete!")
+        print(tr("✅ 校准流程完成 / Calibration process complete!"))
         print("=" * 50)
-        print("💡 如果舵机保持原位（位移很小），说明校准成功")
-        print("   If servos stayed near original position, calibration is successful")
+        print(tr("💡 如果舵机保持原位（位移很小），说明校准成功\n   If servos stayed near original position, calibration is successful"))
         print("=" * 50)
 
         return True
 
     except Exception as e:
-        print(f"\n❌ 校准异常 / Calibration error: {e}")
+        print(tr("\n❌ 校准异常 / Calibration error: {}").format(e))
         return False
     finally:
         try:
@@ -478,67 +484,66 @@ def auto_calibration(port_name: str) -> bool:
     自动中位校准 - 快速模式
     """
     print(f"\n{'='*55}")
-    print(f"🔧 舵机中位校准工具（自动模式）/ Servo Middle Calibration (Auto)")
+    print(tr("🔧 舵机中位校准工具（自动模式）/ Servo Middle Calibration (Auto)"))
     print(f"{'='*55}")
-    print(f"端口 / Port: {port_name}")
+    print(tr("端口 / Port: {}").format(port_name))
     print(f"{'='*55}\n")
 
     # 初始化端口
     try:
         port_handler = PortHandler(port_name)
         if not port_handler.openPort():
-            print(f"❌ 无法打开串口 / Cannot open {port_name}")
+            print(tr("❌ 无法打开串口 / Cannot open {}").format(port_name))
             return False
         if not port_handler.setBaudRate(BAUD_RATE):
-            print(f"❌ 无法设置波特率 / Cannot set baud rate")
+            print(tr("❌ 无法设置波特率 / Cannot set baud rate"))
             port_handler.closePort()
             return False
 
         servo_handler = sms_sts(port_handler)
 
         # 扫描舵机
-        print("📡 扫描舵机 / Scanning servos...")
+        print(tr("📡 扫描舵机 / Scanning servos..."))
         found_servos = scan_servos(servo_handler)
 
         if not found_servos:
-            print("❌ 未发现舵机 / No servos found")
+            print(tr("❌ 未发现舵机 / No servos found"))
             port_handler.closePort()
             return False
 
-        print(f"✅ 发现 {len(found_servos)} 个舵机 / Found {len(found_servos)} servo(s): {found_servos}\n")
+        print(tr("✅ 发现 {} 个舵机 / Found {} servo(s): {}\n").format(len(found_servos), len(found_servos), found_servos))
 
         # 显示初始状态
         initial_info = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(initial_info, "初始状态 / Initial Status")
+        print_servo_info_table(initial_info, tr("初始状态 / Initial Status"))
         check_servo_health(initial_info)
 
     except Exception as e:
-        print(f"❌ 初始化异常 / Init error: {e}")
+        print(tr("❌ 初始化异常 / Init error: {}").format(e))
         return False
 
     try:
         # 失能舵机
-        print("⏹️ 失能舵机 / Disabling servos...")
+        print(tr("⏹️ 失能舵机 / Disabling servos..."))
         disable_servos(servo_handler, found_servos)
         time.sleep(1)
 
         # 提示手动调整
         print("\n" + "=" * 50)
-        print("!!! 手动步骤 / MANUAL STEP !!!")
-        print(f"请手动将所有舵机 ({found_servos}) 调整到期望的中位位置")
-        print(f"Manually move all servos to desired center position")
-        input("调整完成后按回车 / Press Enter when ready...\n")
+        print(tr("!!! 手动步骤 / MANUAL STEP !!!"))
+        print(tr("请手动将所有舵机 ({}) 调整到期望的中位位置\nManually move all servos to desired center position").format(found_servos))
+        input(tr("调整完成后按回车 / Press Enter when ready...\n"))
         print("=" * 50)
 
         # 读取当前位置与状态
-        print("📍 读取当前位置与状态 / Reading current positions and status...")
+        print(tr("📍 读取当前位置与状态 / Reading current positions and status..."))
         info_before = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(info_before, "校准前状态 / Status Before Calibration")
+        print_servo_info_table(info_before, tr("校准前状态 / Status Before Calibration"))
         check_servo_health(info_before)
         positions_before = {info["id"]: info["position"] for info in info_before if info["position"] is not None}
 
         # 校准
-        print("🔧 校准中位 / Calibrating middle...")
+        print(tr("🔧 校准中位 / Calibrating middle..."))
         success_count = 0
         for servo_id in found_servos:
             print(f"  ID{servo_id}...", end=" ")
@@ -549,31 +554,31 @@ def auto_calibration(port_name: str) -> bool:
                 print("❌")
             time.sleep(0.1)
 
-        print(f"\n✅ {success_count}/{len(found_servos)} 个舵机校准完成\n")
+        print(tr("\n✅ {}/{} 个舵机校准完成\n").format(success_count, len(found_servos)))
         time.sleep(1)
 
         # 校准后状态
         info_after_cal = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(info_after_cal, "校准后状态 / Status After Calibration")
+        print_servo_info_table(info_after_cal, tr("校准后状态 / Status After Calibration"))
         check_servo_health(info_after_cal)
 
         # 移动到中位测试
-        print("🎯 移动到中位测试 / Move to center for testing...")
+        print(tr("🎯 移动到中位测试 / Move to center for testing..."))
         for servo_id in found_servos:
             center_servo(servo_handler, servo_id)
             time.sleep(0.1)
 
-        print("⏳ 等待3秒... / Waiting 3 seconds...")
+        print(tr("⏳ 等待3秒... / Waiting 3 seconds..."))
         time.sleep(3)
 
         # 读取最终位置与状态
-        print("\n📍 最终位置与状态 / Final positions and status:")
+        print(tr("\n📍 最终位置与状态 / Final positions and status:"))
         info_after = read_all_servo_info(servo_handler, found_servos)
-        print_servo_info_table(info_after, "最终状态 / Final Status")
+        print_servo_info_table(info_after, tr("最终状态 / Final Status"))
         check_servo_health(info_after)
 
         # 打印位移摘要
-        print("\n📏 位移摘要 / Movement Summary:")
+        print(tr("\n📏 位移摘要 / Movement Summary:"))
         print("-" * 60)
         for info in info_after:
             servo_id = info["id"]
@@ -581,18 +586,18 @@ def auto_calibration(port_name: str) -> bool:
                 movement = info["position"] - positions_before[servo_id]
                 movement_deg = position_to_degrees(movement)
                 final_deg = position_to_degrees(info["position"])
-                print(f"  ID{servo_id}: {info['position']:4d} ({final_deg:6.1f}°) [位移/movement: {movement:+4d} ({movement_deg:+5.1f}°)]")
+                print(f"  ID{servo_id}: {info['position']:4d} ({final_deg:6.1f}°) [{tr('位移/movement')}: {movement:+4d} ({movement_deg:+5.1f}°)]")
         print("-" * 60)
 
         print()
         print("=" * 50)
-        print("✅ 校准完成 / Calibration complete!")
+        print(tr("✅ 校准完成 / Calibration complete!"))
         print("=" * 50)
 
         return True
 
     except Exception as e:
-        print(f"\n❌ 校准异常 / Calibration error: {e}")
+        print(tr("\n❌ 校准异常 / Calibration error: {}").format(e))
         return False
     finally:
         try:
@@ -606,29 +611,29 @@ def main():
     # 解析参数
     if len(sys.argv) > 1:
         if sys.argv[1] == "--list":
-            print("=== 可用串口 / Available Serial Ports ===")
+            print(tr("=== 可用串口 / Available Serial Ports ==="))
             print(list_ports_for_user())
             return
         else:
             port_name = sys.argv[1]
-            print(f"🔌 使用指定端口 / Using specified port: {port_name}")
+            print(tr("🔌 使用指定端口 / Using specified port: {}").format(port_name))
     else:
         # 交互式选择端口
-        port_name = select_port_interactive("选择校准串口 / Select port to calibrate")
+        port_name = select_port_interactive(tr("选择校准串口 / Select port to calibrate"))
         if not port_name:
-            print("❌ 未选择端口 / No port selected")
+            print(tr("❌ 未选择端口 / No port selected"))
             sys.exit(1)
 
     # 选择模式
     print("\n" + "=" * 50)
-    print("选择模式 / Select Mode:")
+    print(tr("选择模式 / Select Mode:"))
     print("=" * 50)
-    print("1. 交互式模式 / Interactive mode (逐步引导)")
-    print("2. 自动模式 / Auto mode (快速执行)")
+    print(tr("1. 交互式模式 / Interactive mode (逐步引导)"))
+    print(tr("2. 自动模式 / Auto mode (快速执行)"))
     print("=" * 50)
 
     try:
-        mode = input("选择模式 (1/2) / Select mode (1/2): ").strip()
+        mode = input(tr("选择模式 (1/2) / Select mode (1/2): ")).strip()
     except (EOFError, KeyboardInterrupt):
         mode = "2"
 

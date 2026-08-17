@@ -8,6 +8,12 @@ Cross-platform serial port utilities
 import platform
 import os
 
+try:
+    from src.i18n import tr
+except ImportError:
+    def tr(text):
+        return text
+
 
 def get_available_ports(include_virtual=False):
     """
@@ -180,7 +186,7 @@ def get_platform_info():
     }
 
 
-def select_port_interactive(prompt="请选择串口 / Select serial port"):
+def select_port_interactive(prompt=None):
     """
     交互式选择串口
     Interactive port selection
@@ -193,33 +199,34 @@ def select_port_interactive(prompt="请选择串口 / Select serial port"):
         str: 用户选择的串口设备路径，如果没有选择则返回None
              User-selected port device path, or None if no selection
     """
+    if prompt is None:
+        prompt = tr("请选择串口 / Select serial port")
     ports = get_available_ports()
 
     if not ports:
-        print("❌ 未发现可用串口 / No serial ports found")
-        print("   请检查 USB 转串口适配器是否已连接")
-        print("   Please ensure USB-to-Serial adapter is connected")
+        print(tr("❌ 未发现可用串口 / No serial ports found"))
+        print(tr("   请检查 USB 转串口适配器是否已连接\n   Please ensure USB-to-Serial adapter is connected"))
         return None
 
     if len(ports) == 1:
         # 只有一个端口，自动返回
         port = ports[0]
-        print(f"🔌 自动选择唯一端口 / Auto-select only port: {port.device}")
+        print(tr("🔌 自动选择唯一端口 / Auto-select only port: {}").format(port.device))
         if port.description:
-            print(f"   描述 / Description: {port.description}")
+            print(tr("   描述 / Description: {}").format(port.description))
         return port.device
 
     # 多个端口，让用户选择
     print(f"\n{'='*50}")
-    print(f"发现 {len(ports)} 个可用串口 / Found {len(ports)} available serial port(s):")
+    print(tr("发现 {} 个可用串口 / Found {} available serial port(s):").format(len(ports), len(ports)))
     print(f"{'='*50}")
 
     for i, port in enumerate(ports):
         print(f"\n  [{i}] {port.device}")
         if port.description:
-            print(f"      描述 / Description: {port.description}")
+            print(tr("      描述 / Description: {}").format(port.description))
         if port.manufacturer:
-            print(f"      制造商 / Manufacturer: {port.manufacturer}")
+            print(tr("      制造商 / Manufacturer: {}").format(port.manufacturer))
         if port.vid and port.pid:
             print(f"      USB ID: {port.vid:04x}:{port.pid:04x}")
 
@@ -227,7 +234,7 @@ def select_port_interactive(prompt="请选择串口 / Select serial port"):
 
     while True:
         try:
-            user_input = input(f"\n{prompt} [0-{len(ports)-1}] (直接回车选择第一个 / Enter for first): ").strip()
+            user_input = input(tr("\n{} [0-{}] (直接回车选择第一个 / Enter for first): ").format(prompt, len(ports)-1)).strip()
 
             if not user_input:
                 selection = 0
@@ -236,17 +243,15 @@ def select_port_interactive(prompt="请选择串口 / Select serial port"):
 
             if 0 <= selection < len(ports):
                 selected = ports[selection]
-                print(f"✅ 已选择 / Selected: {selected.device}")
+                print(tr("✅ 已选择 / Selected: {}").format(selected.device))
                 return selected.device
             else:
-                print(f"❌ 无效选择，请输入 0-{len(ports)-1} 之间的数字")
-                print(f"   Invalid selection, please enter 0-{len(ports)-1}")
+                print(tr("❌ 无效选择，请输入 0-{} 之间的数字\n   Invalid selection, please enter 0-{}").format(len(ports)-1, len(ports)-1))
 
         except ValueError:
-            print(f"❌ 无效输入，请输入数字")
-            print(f"   Invalid input, please enter a number")
+            print(tr("❌ 无效输入，请输入数字\n   Invalid input, please enter a number"))
         except (EOFError, KeyboardInterrupt):
-            print(f"\n❌ 用户取消 / User cancelled")
+            print(tr("\n❌ 用户取消 / User cancelled"))
             return None
 
 
@@ -263,8 +268,8 @@ if __name__ == "__main__":
 
     # 测试交互式选择
     print("\n" + "="*50)
-    print("测试交互式端口选择 / Testing interactive port selection")
+    print(tr("测试交互式端口选择 / Testing interactive port selection"))
     print("="*50)
     selected = select_port_interactive()
     if selected:
-        print(f"\n最终选择 / Final selection: {selected}")
+        print(tr("\n最终选择 / Final selection: {}").format(selected))

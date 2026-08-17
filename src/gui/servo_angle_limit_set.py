@@ -29,6 +29,18 @@ except ImportError:
     setup_light_theme = None
 
 try:
+    from src.i18n import tr, set_lang, lang_from_argv
+except ImportError:
+    def tr(text):
+        return text
+
+    def set_lang(lang):
+        return lang
+
+    def lang_from_argv(argv):
+        return None
+
+try:
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
@@ -84,32 +96,32 @@ class ServoMonitorWorker(QObject):
         try:
             self.port_handler = PortHandler(self.port_name)
             if not self.port_handler.openPort():
-                self.status_changed.emit(f"❌ 无法打开串口: {self.port_name}")
+                self.status_changed.emit(tr("❌ 无法打开串口: {}").format(self.port_name))
                 return False
 
             if not self.port_handler.setBaudRate(1000000):
-                self.status_changed.emit(f"❌ 无法设置波特率")
+                self.status_changed.emit(tr("❌ 无法设置波特率"))
                 self.port_handler.closePort()
                 return False
 
             self.servo_handler = sms_sts(self.port_handler)
-            self.status_changed.emit(f"✅ 成功连接到 {self.port_name}")
+            self.status_changed.emit(tr("✅ 成功连接到 {}").format(self.port_name))
             return True
 
         except Exception as e:
-            self.status_changed.emit(f"❌ 连接失败: {e}")
+            self.status_changed.emit(tr("❌ 连接失败: {}").format(e))
             return False
 
     def disconnect(self):
         """断开连接"""
         if self.port_handler:
             self.port_handler.closePort()
-        self.status_changed.emit("🔌 已断开连接")
+        self.status_changed.emit(tr("🔌 已断开连接"))
 
     def scan_servos(self) -> List[int]:
         """扫描舵机 - 支持热插拔"""
         found_servos = []
-        self.status_changed.emit("📡 扫描舵机中...")
+        self.status_changed.emit(tr("📡 扫描舵机中..."))
 
         for servo_id in self.servo_ids:
             try:
@@ -123,21 +135,21 @@ class ServoMonitorWorker(QObject):
 
                     # 热插拔检测 - 新连接
                     if not was_connected and self.servo_data[servo_id].was_connected:
-                        self.status_changed.emit(f"  🔌 重新连接舵机 ID{servo_id}")
+                        self.status_changed.emit(tr("  🔌 重新连接舵机 ID{}").format(servo_id))
                     elif not was_connected and not self.servo_data[servo_id].was_connected:
-                        self.status_changed.emit(f"  ✅ 发现舵机 ID{servo_id}")
+                        self.status_changed.emit(tr("  ✅ 发现舵机 ID{}").format(servo_id))
 
                     self.servo_data[servo_id].connected = True
                     self.servo_data[servo_id].was_connected = True
                 else:
                     # 热插拔检测 - 断开连接
                     if was_connected:
-                        self.status_changed.emit(f"  ❌ 舵机 ID{servo_id} 已断开")
+                        self.status_changed.emit(tr("  ❌ 舵机 ID{} 已断开").format(servo_id))
 
                     if servo_id in self.servo_data:
                         self.servo_data[servo_id].connected = False
             except Exception as e:
-                self.status_changed.emit(f"  ❌ 扫描ID{servo_id}失败: {e}")
+                self.status_changed.emit(tr("  ❌ 扫描ID{}失败: {}").format(servo_id, e))
 
         return found_servos
 
@@ -164,7 +176,7 @@ class ServoMonitorWorker(QObject):
                     else:
                         success = False
                 except Exception as e:
-                    self.status_changed.emit(f"❌ 读取ID{servo_id}位置失败: {e}")
+                    self.status_changed.emit(tr("❌ 读取ID{}位置失败: {}").format(servo_id, e))
                     success = False
 
         return success
@@ -176,11 +188,11 @@ class ServoMonitorWorker(QObject):
 
         found_servos = self.scan_servos()
         if not found_servos:
-            self.status_changed.emit("⚠️ 未发现舵机")
+            self.status_changed.emit(tr("⚠️ 未发现舵机"))
             return
 
         self.running = True
-        self.status_changed.emit(f"🚀 开始监控 {len(found_servos)} 个舵机...")
+        self.status_changed.emit(tr("🚀 开始监控 {} 个舵机...").format(len(found_servos)))
 
         # 启动监控线程
         thread = Thread(target=self._monitor_loop, daemon=True)
@@ -203,7 +215,7 @@ class ServoMonitorWorker(QObject):
                     self.data_updated.emit(list(self.servo_data.values()))
                 time.sleep(0.1)  # 100ms更新间隔
             except Exception as e:
-                self.status_changed.emit(f"❌ 监控异常: {e}")
+                self.status_changed.emit(tr("❌ 监控异常: {}").format(e))
                 time.sleep(1)
 
     def reset_min_max(self):
@@ -211,12 +223,12 @@ class ServoMonitorWorker(QObject):
         for servo_id in self.servo_data:
             self.servo_data[servo_id].min_pos = 4095
             self.servo_data[servo_id].max_pos = 0
-        self.status_changed.emit("🔄 MIN/MAX值已重置，可重新开始记录")
+        self.status_changed.emit(tr("🔄 MIN/MAX值已重置，可重新开始记录"))
 
     def write_angle_limits(self) -> bool:
         """写入位置限制到EEPROM"""
         success_count = 0
-        self.status_changed.emit("💾 开始写入位置限制...")
+        self.status_changed.emit(tr("💾 开始写入位置限制..."))
 
         for servo_id in self.servo_data:
             if self.servo_data[servo_id].connected:
@@ -224,7 +236,7 @@ class ServoMonitorWorker(QObject):
                     # 解锁EEPROM
                     result, error = self.servo_handler.unLockEprom(servo_id)
                     if result != COMM_SUCCESS:
-                        self.status_changed.emit(f"  ❌ ID{servo_id}: EEPROM解锁失败")
+                        self.status_changed.emit(tr("  ❌ ID{}: EEPROM解锁失败").format(servo_id))
                         continue
 
                     time.sleep(0.05)
@@ -235,7 +247,7 @@ class ServoMonitorWorker(QObject):
                         servo_id, SMS_STS_MIN_ANGLE_LIMIT_L, min_pos
                     )
                     if result != COMM_SUCCESS:
-                        self.status_changed.emit(f"  ❌ ID{servo_id}: 写入最小角度失败")
+                        self.status_changed.emit(tr("  ❌ ID{}: 写入最小角度失败").format(servo_id))
                         self.servo_handler.LockEprom(servo_id)
                         continue
 
@@ -247,7 +259,7 @@ class ServoMonitorWorker(QObject):
                         servo_id, SMS_STS_MAX_ANGLE_LIMIT_L, max_pos
                     )
                     if result != COMM_SUCCESS:
-                        self.status_changed.emit(f"  ❌ ID{servo_id}: 写入最大角度失败")
+                        self.status_changed.emit(tr("  ❌ ID{}: 写入最大角度失败").format(servo_id))
                         self.servo_handler.LockEprom(servo_id)
                         continue
 
@@ -260,14 +272,14 @@ class ServoMonitorWorker(QObject):
                     min_pos = self.servo_data[servo_id].min_pos
                     max_pos = self.servo_data[servo_id].max_pos
                     self.status_changed.emit(
-                        f"  ✅ ID{servo_id}: 最小值{min_pos}, 最大值{max_pos}"
+                        tr("  ✅ ID{}: 最小值{}, 最大值{}").format(servo_id, min_pos, max_pos)
                     )
 
                 except Exception as e:
-                    self.status_changed.emit(f"  ❌ ID{servo_id}: 写入异常 {e}")
+                    self.status_changed.emit(tr("  ❌ ID{}: 写入异常 {}").format(servo_id, e))
 
         self.status_changed.emit(
-            f"✅ 写入完成: {success_count}/{len(self.servo_data)} 个舵机"
+            tr("✅ 写入完成: {}/{} 个舵机").format(success_count, len(self.servo_data))
         )
         return success_count > 0
 
@@ -302,7 +314,7 @@ class AngleLimitGUI(QMainWindow):
 
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle("舵机位置限制设置工具")
+        self.setWindowTitle(tr("舵机位置限制设置工具"))
         self.setGeometry(100, 100, 750, 520)
         self.setMinimumSize(600, 400)  # 设置最小尺寸
 
@@ -324,7 +336,7 @@ class AngleLimitGUI(QMainWindow):
         # 状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪")
+        self.status_bar.showMessage(tr("就绪"))
 
         # 应用初始样式
         self.apply_scaled_styles()
@@ -479,12 +491,12 @@ class AngleLimitGUI(QMainWindow):
         self.data_table.verticalHeader().setDefaultSectionSize(int(32 * s))
 
         # 更新按钮宽度
-        self.refresh_btn.setFixedWidth(int(50 * s))
-        self.start_btn.setFixedWidth(int(70 * s))
-        self.stop_btn.setFixedWidth(int(70 * s))
-        self.reset_btn.setFixedWidth(int(55 * s))
-        self.read_limits_btn.setFixedWidth(int(55 * s))
-        self.write_btn.setFixedWidth(int(95 * s))
+        self.refresh_btn.setMinimumWidth(int(50 * s))
+        self.start_btn.setMinimumWidth(int(70 * s))
+        self.stop_btn.setMinimumWidth(int(70 * s))
+        self.reset_btn.setMinimumWidth(int(55 * s))
+        self.read_limits_btn.setMinimumWidth(int(55 * s))
+        self.write_btn.setMinimumWidth(int(95 * s))
         self.port_combo.setMinimumWidth(int(110 * s))
 
         # 更新提示标签样式
@@ -513,13 +525,13 @@ class AngleLimitGUI(QMainWindow):
 
     def create_control_panel(self, layout):
         """创建控制面板 - 紧凑布局"""
-        control_group = QGroupBox("控制面板")
+        control_group = QGroupBox(tr("控制面板"))
         control_layout = QHBoxLayout(control_group)
         control_layout.setSpacing(8)
         control_layout.setContentsMargins(10, 10, 10, 10)
 
         # 串口选择（紧凑横向布局）
-        self.port_label = QLabel("串口:")
+        self.port_label = QLabel(tr("串口:"))
         self.port_label.setStyleSheet("font-weight: bold; color: #455a64;")
         control_layout.addWidget(self.port_label)
 
@@ -527,9 +539,9 @@ class AngleLimitGUI(QMainWindow):
         self.port_combo.setMinimumWidth(110)
         control_layout.addWidget(self.port_combo)
 
-        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn = QPushButton(tr("刷新"))
         self.refresh_btn.setObjectName("refreshBtn")
-        self.refresh_btn.setFixedWidth(50)
+        self.refresh_btn.setMinimumWidth(50)
         self.refresh_btn.clicked.connect(self.refresh_ports)
         control_layout.addWidget(self.refresh_btn)
 
@@ -537,36 +549,36 @@ class AngleLimitGUI(QMainWindow):
         control_layout.addSpacing(15)
 
         # 操作按钮组
-        self.start_btn = QPushButton("▶ 开始")
+        self.start_btn = QPushButton(tr("▶ 开始"))
         self.start_btn.setObjectName("startBtn")
-        self.start_btn.setFixedWidth(70)
+        self.start_btn.setMinimumWidth(70)
         self.start_btn.clicked.connect(self.start_monitoring)
         control_layout.addWidget(self.start_btn)
 
-        self.stop_btn = QPushButton("■ 停止")
+        self.stop_btn = QPushButton(tr("■ 停止"))
         self.stop_btn.setObjectName("stopBtn")
-        self.stop_btn.setFixedWidth(70)
+        self.stop_btn.setMinimumWidth(70)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_monitoring)
         control_layout.addWidget(self.stop_btn)
 
-        self.reset_btn = QPushButton("重置")
+        self.reset_btn = QPushButton(tr("重置"))
         self.reset_btn.setObjectName("resetBtn")
-        self.reset_btn.setFixedWidth(55)
+        self.reset_btn.setMinimumWidth(55)
         self.reset_btn.clicked.connect(self.reset_min_max)
         control_layout.addWidget(self.reset_btn)
 
         control_layout.addSpacing(15)
 
-        self.read_limits_btn = QPushButton("读取")
+        self.read_limits_btn = QPushButton(tr("读取"))
         self.read_limits_btn.setObjectName("readBtn")
-        self.read_limits_btn.setFixedWidth(55)
+        self.read_limits_btn.setMinimumWidth(55)
         self.read_limits_btn.clicked.connect(self.read_current_limits)
         control_layout.addWidget(self.read_limits_btn)
 
-        self.write_btn = QPushButton("写入EEPROM")
+        self.write_btn = QPushButton(tr("写入EEPROM"))
         self.write_btn.setObjectName("writeBtn")
-        self.write_btn.setFixedWidth(95)
+        self.write_btn.setMinimumWidth(95)
         self.write_btn.setEnabled(False)
         self.write_btn.clicked.connect(self.write_limits)
         control_layout.addWidget(self.write_btn)
@@ -576,7 +588,7 @@ class AngleLimitGUI(QMainWindow):
 
     def create_data_table(self, layout):
         """创建数据表格"""
-        table_group = QGroupBox("实时位置数据")
+        table_group = QGroupBox(tr("实时位置数据"))
         table_layout = QVBoxLayout(table_group)
         table_layout.setContentsMargins(8, 12, 8, 8)
 
@@ -616,7 +628,7 @@ class AngleLimitGUI(QMainWindow):
 
         # 简洁说明
         self.info_label = QLabel(
-            "操作: 开始→转动舵机采集范围→停止→写入EEPROM | 热插拔后请先重置 | 读取可查看已标定值"
+            tr("操作: 开始→转动舵机采集范围→停止→写入EEPROM | 热插拔后请先重置 | 读取可查看已标定值")
         )
         self.info_label.setStyleSheet("""
             background-color: #e8f5e9;
@@ -657,10 +669,10 @@ class AngleLimitGUI(QMainWindow):
                 self.port_combo.setCurrentIndex(0)
         else:
             # 没有可用串口，添加提示
-            self.port_combo.addItem("未检测到串口")
+            self.port_combo.addItem(tr("未检测到串口"))
             self.port_combo.setEnabled(False)
 
-        self.update_status(f"检测到 {len(available_ports)} 个可用串口")
+        self.update_status(tr("检测到 {} 个可用串口").format(len(available_ports)))
 
     def start_flash_timer(self):
         """启动闪烁定时器"""
@@ -713,7 +725,7 @@ class AngleLimitGUI(QMainWindow):
 
     def on_port_changed(self, port_name):
         """端口改变"""
-        if port_name and port_name != "未检测到串口":
+        if port_name and port_name != tr("未检测到串口"):
             self.port_name = port_name
 
     def start_monitoring(self):
@@ -721,8 +733,8 @@ class AngleLimitGUI(QMainWindow):
         if self.worker and self.worker.running:
             return
 
-        if not self.port_name or self.port_name == "未检测到串口":
-            self.update_status("❌ 请选择有效的串口")
+        if not self.port_name or self.port_name == tr("未检测到串口"):
+            self.update_status(tr("❌ 请选择有效的串口"))
             return
 
         self.worker = ServoMonitorWorker(self.port_name)
@@ -766,23 +778,23 @@ class AngleLimitGUI(QMainWindow):
 
     def read_current_limits(self):
         """读取当前EEPROM中存储的角度限制"""
-        if not self.port_name or self.port_name == "未检测到串口":
-            self.update_status("❌ 请选择有效的串口")
+        if not self.port_name or self.port_name == tr("未检测到串口"):
+            self.update_status(tr("❌ 请选择有效的串口"))
             return
 
         # 临时连接读取
         try:
             port_handler = PortHandler(self.port_name)
             if not port_handler.openPort():
-                self.update_status(f"❌ 无法打开串口: {self.port_name}")
+                self.update_status(tr("❌ 无法打开串口: {}").format(self.port_name))
                 return
             if not port_handler.setBaudRate(1000000):
-                self.update_status("❌ 无法设置波特率")
+                self.update_status(tr("❌ 无法设置波特率"))
                 port_handler.closePort()
                 return
 
             servo_handler = sms_sts(port_handler)
-            self.update_status("📖 正在读取EEPROM中的角度限制...")
+            self.update_status(tr("📖 正在读取EEPROM中的角度限制..."))
 
             results = []
             for servo_id in range(1, 7):
@@ -790,7 +802,7 @@ class AngleLimitGUI(QMainWindow):
                     # ping检测舵机是否存在
                     _, result, _ = servo_handler.ping(servo_id)
                     if result != COMM_SUCCESS:
-                        results.append(f"ID{servo_id}: 未连接")
+                        results.append(tr("ID{}: 未连接").format(servo_id))
                         continue
 
                     # 读取最小角度限制
@@ -798,7 +810,7 @@ class AngleLimitGUI(QMainWindow):
                         servo_id, SMS_STS_MIN_ANGLE_LIMIT_L
                     )
                     if result != COMM_SUCCESS:
-                        results.append(f"ID{servo_id}: 读取失败")
+                        results.append(tr("ID{}: 读取失败").format(servo_id))
                         continue
 
                     # 读取最大角度限制
@@ -806,27 +818,27 @@ class AngleLimitGUI(QMainWindow):
                         servo_id, SMS_STS_MAX_ANGLE_LIMIT_L
                     )
                     if result != COMM_SUCCESS:
-                        results.append(f"ID{servo_id}: 读取失败")
+                        results.append(tr("ID{}: 读取失败").format(servo_id))
                         continue
 
                     results.append(f"ID{servo_id}: MIN={min_val}, MAX={max_val}")
                 except Exception as e:
-                    results.append(f"ID{servo_id}: 异常 {e}")
+                    results.append(tr("ID{}: 异常 {}").format(servo_id, e))
 
             port_handler.closePort()
 
             # 显示结果
-            msg = "当前EEPROM中存储的角度限制：\n\n" + "\n".join(results)
-            QMessageBox.information(self, "📖 角度限制读取结果", msg)
-            self.update_status("✅ 角度限制读取完成")
+            msg = tr("当前EEPROM中存储的角度限制：\n\n") + "\n".join(results)
+            QMessageBox.information(self, tr("📖 角度限制读取结果"), msg)
+            self.update_status(tr("✅ 角度限制读取完成"))
 
         except Exception as e:
-            self.update_status(f"❌ 读取失败: {e}")
+            self.update_status(tr("❌ 读取失败: {}").format(e))
 
     def write_limits(self):
         """写入角度限制 - 使用保存的采集数据"""
         if not self.collected_data:
-            self.update_status("❌ 没有采集到数据，请先开始监控并采集MIN/MAX值")
+            self.update_status(tr("❌ 没有采集到数据，请先开始监控并采集MIN/MAX值"))
             return
 
         # 检查是否有有效的MIN/MAX数据
@@ -836,15 +848,13 @@ class AngleLimitGUI(QMainWindow):
                 valid_count += 1
 
         if valid_count == 0:
-            self.update_status("❌ 没有有效的MIN/MAX数据，请先转动舵机采集范围")
+            self.update_status(tr("❌ 没有有效的MIN/MAX数据，请先转动舵机采集范围"))
             return
 
         reply = QMessageBox.question(
             self,
-            "确认写入",
-            f"确定要将采集到的位置限制写入到舵机EEPROM吗？\n"
-            f"共有 {valid_count} 个舵机的数据将被写入。\n"
-            "此操作将永久修改舵机的角度限制设置！",
+            tr("确认写入"),
+            tr("确定要将采集到的位置限制写入到舵机EEPROM吗？\n共有 {} 个舵机的数据将被写入。\n此操作将永久修改舵机的角度限制设置！").format(valid_count),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -856,15 +866,15 @@ class AngleLimitGUI(QMainWindow):
         try:
             port_handler = PortHandler(self.port_name)
             if not port_handler.openPort():
-                self.update_status(f"❌ 无法打开串口: {self.port_name}")
+                self.update_status(tr("❌ 无法打开串口: {}").format(self.port_name))
                 return
             if not port_handler.setBaudRate(1000000):
-                self.update_status("❌ 无法设置波特率")
+                self.update_status(tr("❌ 无法设置波特率"))
                 port_handler.closePort()
                 return
 
             servo_handler = sms_sts(port_handler)
-            self.update_status("💾 开始写入位置限制...")
+            self.update_status(tr("💾 开始写入位置限制..."))
 
             success_count = 0
             results = []
@@ -872,14 +882,14 @@ class AngleLimitGUI(QMainWindow):
             for servo_id, data in self.collected_data.items():
                 # 跳过没有有效数据的舵机
                 if data.min_pos == 4095 or data.max_pos == 0:
-                    results.append(f"ID{servo_id}: 跳过（无有效数据）")
+                    results.append(tr("ID{}: 跳过（无有效数据）").format(servo_id))
                     continue
 
                 try:
                     # 解锁EEPROM
                     result, error = servo_handler.unLockEprom(servo_id)
                     if result != COMM_SUCCESS:
-                        results.append(f"ID{servo_id}: EEPROM解锁失败")
+                        results.append(tr("ID{}: EEPROM解锁失败").format(servo_id))
                         continue
 
                     time.sleep(0.05)
@@ -889,7 +899,7 @@ class AngleLimitGUI(QMainWindow):
                         servo_id, SMS_STS_MIN_ANGLE_LIMIT_L, data.min_pos
                     )
                     if result != COMM_SUCCESS:
-                        results.append(f"ID{servo_id}: 写入MIN失败")
+                        results.append(tr("ID{}: 写入MIN失败").format(servo_id))
                         servo_handler.LockEprom(servo_id)
                         continue
 
@@ -900,7 +910,7 @@ class AngleLimitGUI(QMainWindow):
                         servo_id, SMS_STS_MAX_ANGLE_LIMIT_L, data.max_pos
                     )
                     if result != COMM_SUCCESS:
-                        results.append(f"ID{servo_id}: 写入MAX失败")
+                        results.append(tr("ID{}: 写入MAX失败").format(servo_id))
                         servo_handler.LockEprom(servo_id)
                         continue
 
@@ -910,20 +920,20 @@ class AngleLimitGUI(QMainWindow):
                     servo_handler.LockEprom(servo_id)
 
                     success_count += 1
-                    results.append(f"ID{servo_id}: ✅ MIN={data.min_pos}, MAX={data.max_pos}")
+                    results.append(tr("ID{}: ✅ MIN={}, MAX={}").format(servo_id, data.min_pos, data.max_pos))
 
                 except Exception as e:
-                    results.append(f"ID{servo_id}: 异常 {e}")
+                    results.append(tr("ID{}: 异常 {}").format(servo_id, e))
 
             port_handler.closePort()
 
             # 显示结果
-            msg = f"写入完成: {success_count}/{valid_count}\n\n" + "\n".join(results)
-            QMessageBox.information(self, "💾 写入结果", msg)
-            self.update_status(f"✅ 写入完成: {success_count}/{valid_count}")
+            msg = tr("写入完成: {}/{}\n\n").format(success_count, valid_count) + "\n".join(results)
+            QMessageBox.information(self, tr("💾 写入结果"), msg)
+            self.update_status(tr("✅ 写入完成: {}/{}").format(success_count, valid_count))
 
         except Exception as e:
-            self.update_status(f"❌ 写入失败: {e}")
+            self.update_status(tr("❌ 写入失败: {}").format(e))
 
     def update_table(self, servo_data_list: List[ServoData]):
         """更新表格数据 - 显示原始位置值，变化时闪烁"""
@@ -1020,19 +1030,21 @@ def main():
     """主函数"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='舵机位置限制设置工具')
-    parser.add_argument('--port', type=str, default=None, help='指定串口（不指定则自动检测）')
-    parser.add_argument('--list-ports', action='store_true', help='列出可用串口')
+    parser = argparse.ArgumentParser(description=tr('舵机位置限制设置工具'))
+    parser.add_argument('--port', type=str, default=None, help=tr('指定串口（不指定则自动检测）'))
+    parser.add_argument('--list-ports', action='store_true', help=tr('列出可用串口'))
+    parser.add_argument('--lang', choices=['zh', 'en'], default=None,
+                        help=tr('界面语言 (zh=中文, en=English)，不指定则启动时选择'))
     args = parser.parse_args()
 
     if args.list_ports:
         ports = get_available_ports()
-        print("可用串口:")
+        print(tr("可用串口:"))
         if ports:
             for port in ports:
                 print(f"  {port}")
         else:
-            print("  未检测到可用串口")
+            print(tr("  未检测到可用串口"))
         return
 
     app = QApplication(sys.argv)
@@ -1041,14 +1053,21 @@ def main():
     else:
         app.setStyle('Fusion')
 
+    # 语言选择：--lang 指定时直接使用，否则弹出选择对话框
+    if args.lang:
+        set_lang(args.lang)
+    else:
+        from src.gui.language_dialog import choose_language
+        set_lang(choose_language())
+
     # 使用命令行参数中的端口，但允许为None（自动检测）
     window = AngleLimitGUI(args.port)
     window.show()
 
     if args.port:
-        print(f"启动位置限制设置工具 - 串口: {args.port}")
+        print(tr("启动位置限制设置工具 - 串口: {}").format(args.port))
     else:
-        print("启动位置限制设置工具 - 自动检测串口")
+        print(tr("启动位置限制设置工具 - 自动检测串口"))
     sys.exit(app.exec())
 
 
